@@ -138,11 +138,56 @@ def get_llm_engine() -> LLMEngine:
 
 
 def extract_json(text: str) -> Optional[Dict[str, Any]]:
-    """Metin içinden ilk JSON objesini çıkarır."""
+    """Metin içinden ilk JSON objesini çıkarır.
+    
+    Ciddi parser: kod blokları, düzensiz metinler, birden fazla JSON objesi
+    gibi karmaşık durumları yönetir.
+    """
+    if not text:
+        return None
+    
+    # 1. JSON kod blokları arasından ara (```json ... ```)
+    code_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', text, re.DOTALL)
+    if code_match:
+        try:
+            return json.loads(code_match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    
+    # 2. Düz metin içinden en içteki { ... } parantezini bul
+    # Stack-based matching: doğru şekilde eşleşen süslü parantezleri bul
+    best_match = None
+    best_depth = 0
+    
+    for start in range(len(text)):
+        if text[start] == '{':
+            depth = 1
+            for end in range(start + 1, len(text)):
+                if text[end] == '{':
+                    depth += 1
+                elif text[end] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        candidate = text[start:end+1]
+                        try:
+                            parsed = json.loads(candidate)
+                            # En derin (en içteki) eşleşmeyi tercih et
+                            if candidate.count('{') > best_depth:
+                                best_match = parsed
+                                best_depth = candidate.count('{')
+                        except json.JSONDecodeError:
+                            pass
+                        break
+    
+    if best_match is not None:
+        return best_match
+    
+    # 3. Basit regex fallback
     match = re.search(r'\{.*\}', text, flags=re.DOTALL)
     if match:
         try:
             return json.loads(match.group(0))
         except json.JSONDecodeError:
             pass
+    
     return None

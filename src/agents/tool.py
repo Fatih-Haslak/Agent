@@ -6,14 +6,23 @@ from src.state import AgentState
 TOOL_PROMPT = """Sen bir Tool Agent'sın. Matematiksel hesaplama ve HTTP istekleri yaparsın.
 
 Kullanılabilir araçlar:
-- calculator: Matematiksel ifadeleri hesaplar. Argüman: {"expression": "2+2"}
-- http_request: HTTP isteği gönderir (kritik, onay gerektirir). Argüman: {"method": "GET", "url": "https://..."}
+- calculator(expression: str)  → Matematiksel ifadeyi hesaplar
+- http_request(method: str, url: str, headers: Optional[str] = None, body: Optional[str] = None) → HTTP isteği gönderir
 
-Eğer araç kullanman gerekiyorsa, JSON formatında tool çağrısı yap:
-{"tool": "calculator", "args": {"expression": "15 * 23"}}
-
+KURAL: Eğer araç kullanman gerekiyorsa, KESİNLİKLE aşağıdaki JSON formatında tool çağrısı yap.
 Eğer araç kullanmana gerek yoksa, doğrudan yanıt ver.
-Yanıtın başında JSON kullanma, doğrudan cevap ver."""
+
+DOĞRU ÖRNEK (araç kullanımı):
+{"tool": "calculator", "args": {"expression": "15 * 23 + 7"}}
+
+DOĞRU ÖRNEK (doğrudan yanıt):
+15 çarpı 23, 345 eder.
+
+YANLIŞ ÖRNEKLER (ASLA YAPMA):
+- Hesaplayalım: {"tool": ...}  ← JSON öncesi metin yazma!
+- calculator(15*23)  ← fonksiyon çağrısı yazma!
+
+ÖNEMLİ: Tool çağrısı yapacaksan SADECE tek satır JSON yaz. Doğrudan yanıt vereceksen SADECE yanıtını yaz."""
 
 
 def tool_agent_node(state: AgentState):
@@ -26,13 +35,13 @@ def tool_agent_node(state: AgentState):
         content = getattr(m, 'content', str(m))
         context += f"{role}: {content}\n"
 
-    user_prompt = f"Konuşma geçmişi:\n{context}\n\nGörevi tamamla."
-    raw = llm.chat(TOOL_PROMPT, user_prompt, max_new_tokens=200, temperature=0.1)
+    user_prompt = f"Konuşma geçmişi:\n{context}\n\nGörevi tamamla. Tool kullanacaksan SADECE JSON yaz."
+    raw = llm.chat(TOOL_PROMPT, user_prompt, max_new_tokens=200, temperature=0.0)
 
     tool_call = extract_json(raw)
     if tool_call and "tool" in tool_call:
         return {
-            "messages": [AIMessage(content=raw)],
+            "messages": [AIMessage(content=f"[Tool] Tool çağrısı: {tool_call['tool']}")],
             "tool_calls": [{"name": tool_call["tool"], "args": tool_call.get("args", {}), "id": "tc_tool"}],
             "current_agent": "tool"
         }
