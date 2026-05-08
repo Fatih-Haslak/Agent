@@ -1,7 +1,7 @@
 import json
 from typing import List
 from langchain_core.tools import tool
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 
 @tool

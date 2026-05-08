@@ -181,7 +181,6 @@ def create_ui():
                 chatbot = gr.Chatbot(
                     label="💬 Konuşma",
                     height=500,
-                    type="messages",
                 )
                 
                 with gr.Row():
