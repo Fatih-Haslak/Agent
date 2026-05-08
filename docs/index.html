@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Agent System Architecture</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #e2e8f0; }
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .node-card {
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        .node-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px -10px rgba(99, 102, 241, 0.5);
+        }
+        .arrow {
+            position: relative;
+            height: 2px;
+            background: linear-gradient(90deg, #6366f1, #8b5cf6);
+        }
+        .arrow::after {
+            content: '';
+            position: absolute;
+            right: 0;
+            top: -4px;
+            border: 5px solid transparent;
+            border-left: 8px solid #8b5cf6;
+        }
+        .pulse {
+            animation: pulse-animation 2s infinite;
+        }
+        @keyframes pulse-animation {
+            0% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(99, 102, 241, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+        }
+        .critical-badge {
+            background: linear-gradient(135deg, #ef4444, #f97316);
+            animation: shake 2s infinite;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            5%, 15%, 25% { transform: translateX(-3px); }
+            10%, 20%, 30% { transform: translateX(3px); }
+        }
+        .step-active {
+            border-color: #6366f1 !important;
+            background: rgba(99, 102, 241, 0.1) !important;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+
+    <!-- Header -->
+    <header class="text-center mb-12">
+        <h1 class="text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 mb-4">
+            Multi-Agent System Architecture
+        </h1>
+        <p class="text-slate-400 text-lg">
+            LangGraph + Turkish-Gemma-9b • Human-in-the-Loop • Türkçe
+        </p>
+        <div class="mt-6 flex justify-center gap-4 flex-wrap">
+            <span class="px-4 py-2 rounded-full glass-panel text-sm text-indigo-300 border border-indigo-500/30">
+                <i class="fas fa-brain mr-2"></i>Local LLM
+            </span>
+            <span class="px-4 py-2 rounded-full glass-panel text-sm text-purple-300 border border-purple-500/30">
+                <i class="fas fa-memory mr-2"></i>SQLite Memory
+            </span>
+            <span class="px-4 py-2 rounded-full glass-panel text-sm text-pink-300 border border-pink-500/30">
+                <i class="fas fa-shield-alt mr-2"></i>Interrupt Onay
+            </span>
+        </div>
+    </header>
+
+    <!-- Main Architecture Flow -->
+    <main class="max-w-7xl mx-auto">
+        
+        <!-- Level 1: User & Supervisor -->
+        <section class="mb-16">
+            <h2 class="text-2xl font-semibold text-center mb-8 text-indigo-300">
+                <i class="fas fa-layer-group mr-2"></i>Seviye 1: Routing Kararı
+            </h2>
+            <div class="flex flex-col md:flex-row items-center justify-center gap-8">
+                
+                <!-- User -->
+                <div class="node-card glass-panel rounded-2xl p-6 w-full md:w-64 text-center border border-slate-700">
+                    <div class="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-full flex items-center justify-center text-2xl">
+                        <i class="fas fa-user text-white"></i>
+                    </div>
+                    <h3 class="font-bold text-lg mb-2">Kullanıcı</h3>
+                    <p class="text-sm text-slate-400">"Sergen Yalçın kimdir?"</p>
+                </div>
+
+                <!-- Arrow -->
+                <div class="hidden md:block arrow w-24"></div>
+                <div class="md:hidden h-12 w-0.5 bg-gradient-to-b from-indigo-500 to-purple-500"></div>
+
+                <!-- Supervisor -->
+                <div class="node-card glass-panel rounded-2xl p-6 w-full md:w-80 border-2 border-indigo-500/50 pulse">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center">
+                            <i class="fas fa-chess-king text-white text-xl"></i>
+                        </div>
+                        <span class="px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-mono">SEVİYE 1</span>
+                    </div>
+                    <h3 class="font-bold text-xl mb-2 text-indigo-300">Supervisor Agent</h3>
+                    <p class="text-sm text-slate-300 mb-3">"Bu görev hangi agent'a gitsin?"</p>
+                    <div class="space-y-2">
+                        <div class="flex items-center gap-2 text-xs text-slate-400">
+                            <i class="fas fa-arrow-right text-indigo-400"></i>
+                            <span>Bilgi sorusu → <strong class="text-emerald-400">Research</strong></span>
+                        </div>
+                        <div class="flex items-center gap-2 text-xs text-slate-400">
+                            <i class="fas fa-arrow-right text-indigo-400"></i>
+                            <span>Matematik → <strong class="text-orange-400">Tool</strong></span>
+                        </div>
+                        <div class="flex items-center gap-2 text-xs text-slate-400">
+                            <i class="fas fa-arrow-right text-indigo-400"></i>
+                            <span>Kod/Dosya → <strong class="text-blue-400">Code</strong></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Level 2: Sub Agents -->
+        <section class="mb-16">
+            <h2 class="text-2xl font-semibold text-center mb-8 text-purple-300">
+                <i class="fas fa-layer-group mr-2"></i>Seviye 2: Agent & Tool Seçimi
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+                
+                <!-- Research Agent -->
+                <div class="node-card glass-panel rounded-2xl p-6 border border-emerald-500/30">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center">
+                            <i class="fas fa-search text-white text-xl"></i>
+                        </div>
+                        <span class="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-mono">AGENT</span>
+                    </div>
+                    <h3 class="font-bold text-lg mb-2 text-emerald-300">Research Agent</h3>
+                    <p class="text-sm text-slate-400 mb-4">"Hangi araçla araştırma yapayım?"</p>
+                    <div class="space-y-2">
+                        <div class="flex items-center gap-2 p-2 rounded-lg bg-slate-800/50 border border-slate-700">
+                            <i class="fas fa-book text-emerald-400"></i>
+                            <span class="text-xs">wiki_search</span>
+                        </div>
+                        <div class="flex items-center gap-2 p-2 rounded-lg bg-slate-800/50 border border-slate-700">
+                            <i class="fas fa-globe text-emerald-400"></i>
+                            <span class="text-xs">web_search</span>
+                        </div>
+                        <div class="flex items-center gap-2 p-2 rounded-lg bg-slate-800/50 border border-slate-700">
+                            <i class="fas fa-compress-alt text-emerald-400"></i>
+                            <span class="text-xs">summarize</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tool Agent -->
+                <div class="node-card glass-panel rounded-2xl p-6 border border-orange-500/30">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="w-12 h-12 bg-gradient-to-br from-orange-500 to-red-600 rounded-xl flex items-center justify-center">
+                            <i class="fas fa-calculator text-white text-xl"></i>
+                        </div>
+                        <span class="px-3 py-1 rounded-full bg-orange-500/20 text-orange-300 text-xs font-mono">AGENT</span>
+                    </div>
+                    <h3 class="font-bold text-lg mb-2 text-orange-300">Tool Agent</h3>
+                    <p class="text-sm text-slate-400 mb-4">"Hesaplama mı yoksa API mi?"</p>
+                    <div class="space-y-2">
+                        <div class="flex items-center gap-2 p-2 rounded-lg bg-slate-800/50 border border-slate-700">
+                            <i class="fas fa-calculator text-orange-400"></i>
+                            <span class="text-xs">calculator</span>
+                        </div>
+                        <div class="flex items-center gap-2 p-2 rounded-lg bg-slate-800/50 border border-red-500/50 relative overflow-hidden">
+                            <i class="fas fa-globe-americas text-red-400"></i>
+                            <span class="text-xs">http_request</span>
+                            <span class="absolute top-1 right-1 text-[8px] px-1 bg-red-500 text-white rounded critical-badge">KRİTİK</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Code Agent -->
+                <div class="node-card glass-panel rounded-2xl p-6 border border-blue-500/30">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center">
+                            <i class="fas fa-code text-white text-xl"></i>
+                        </div>
+                        <span class="px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 text-xs font-mono">AGENT</span>
+                    </div>
+                    <h3 class="font-bold text-lg mb-2 text-blue-300">Code Agent</h3>
+                    <p class="text-sm text-slate-400 mb-4">"Kod yazayım mı tool mu çağrayım?"</p>
+                    <div class="space-y-2">
+                        <div class="flex items-center gap-2 p-2 rounded-lg bg-slate-800/50 border border-red-500/50 relative overflow-hidden">
+                            <i class="fas fa-terminal text-red-400"></i>
+                            <span class="text-xs">code_exec</span>
+                            <span class="absolute top-1 right-1 text-[8px] px-1 bg-red-500 text-white rounded critical-badge">KRİTİK</span>
+                        </div>
+                        <div class="flex items-center gap-2 p-2 rounded-lg bg-slate-800/50 border border-slate-700">
+                            <i class="fas fa-file-alt text-blue-400"></i>
+                            <span class="text-xs">file_io (read)</span>
+                        </div>
+                        <div class="flex items-center gap-2 p-2 rounded-lg bg-slate-800/50 border border-red-500/50 relative overflow-hidden">
+                            <i class="fas fa-file-import text-red-400"></i>
+                            <span class="text-xs">file_io (write)</span>
+                            <span class="absolute top-1 right-1 text-[8px] px-1 bg-red-500 text-white rounded critical-badge">KRİTİK</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Level 3: Tool Execution -->
+        <section class="mb-16">
+            <h2 class="text-2xl font-semibold text-center mb-8 text-pink-300">
+                <i class="fas fa-layer-group mr-2"></i>Seviye 3: Tool Yürütme & Onay
+            </h2>
+            <div class="max-w-4xl mx-auto">
+                <div class="glass-panel rounded-2xl p-8 border border-pink-500/30">
+                    <div class="flex flex-col md:flex-row items-center justify-center gap-6">
+                        
+                        <!-- Tool Executor -->
+                        <div class="text-center">
+                            <div class="w-20 h-20 mx-auto mb-4 bg-gradient-to-br from-pink-500 to-rose-600 rounded-2xl flex items-center justify-center shadow-lg shadow-pink-500/20">
+                                <i class="fas fa-cogs text-white text-3xl"></i>
+                            </div>
+                            <h3 class="font-bold text-lg text-pink-300">Tool Executor</h3>
+                            <p class="text-sm text-slate-400">Tool'u çalıştır</p>
+                        </div>
+
+                        <!-- Arrow -->
+                        <div class="hidden md:block arrow w-20"></div>
+                        <div class="md:hidden h-12 w-0.5 bg-gradient-to-b from-pink-500 to-rose-500"></div>
+
+                        <!-- Interrupt Check -->
+                        <div class="text-center">
+                            <div class="w-20 h-20 mx-auto mb-4 bg-gradient-to-br from-amber-500 to-orange-600 rounded-2xl flex items-center justify-center shadow-lg shadow-amber-500/20 pulse">
+                                <i class="fas fa-shield-alt text-white text-3xl"></i>
+                            </div>
+                            <h3 class="font-bold text-lg text-amber-300">Kritik Kontrol</h3>
+                            <p class="text-sm text-slate-400">Onay gerekli mi?</p>
+                        </div>
+
+                        <!-- Arrow -->
+                        <div class="hidden md:block arrow w-20"></div>
+                        <div class="md:hidden h-12 w-0.5 bg-gradient-to-b from-amber-500 to-emerald-500"></div>
+
+                        <!-- Result -->
+                        <div class="text-center">
+                            <div class="w-20 h-20 mx-auto mb-4 bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                                <i class="fas fa-check-circle text-white text-3xl"></i>
+                            </div>
+                            <h3 class="font-bold text-lg text-emerald-300">Sonuç</h3>
+                            <p class="text-sm text-slate-400">Supervisor'a dön</p>
+                        </div>
+                    </div>
+
+                    <!-- Interrupt Detail -->
+                    <div class="mt-8 p-4 rounded-xl bg-slate-800/50 border border-red-500/30">
+                        <div class="flex items-center gap-3 mb-3">
+                            <i class="fas fa-exclamation-triangle text-red-400 text-xl"></i>
+                            <h4 class="font-bold text-red-300">Human-in-the-Loop (Interrupt)</h4>
+                        </div>
+                        <p class="text-sm text-slate-300 mb-3">
+                            Kritik tool'lar öncesi sistem durur ve kullanıcıdan onay ister:
+                        </p>
+                        <div class="flex flex-wrap gap-2">
+                            <span class="px-3 py-1 rounded-lg bg-red-500/20 text-red-300 text-xs border border-red-500/30">
+                                <i class="fas fa-terminal mr-1"></i>code_exec
+                            </span>
+                            <span class="px-3 py-1 rounded-lg bg-red-500/20 text-red-300 text-xs border border-red-500/30">
+                                <i class="fas fa-file-import mr-1"></i>file_io (write/delete)
+                            </span>
+                            <span class="px-3 py-1 rounded-lg bg-red-500/20 text-red-300 text-xs border border-red-500/30">
+                                <i class="fas fa-globe-americas mr-1"></i>http_request
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Memory Layer -->
+        <section class="mb-16">
+            <h2 class="text-2xl font-semibold text-center mb-8 text-cyan-300">
+                <i class="fas fa-memory mr-2"></i>Bellek Katmanı
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+                <div class="glass-panel rounded-2xl p-6 border border-cyan-500/30">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-10 h-10 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-lg flex items-center justify-center">
+                            <i class="fas fa-bolt text-white"></i>
+                        </div>
+                        <h3 class="font-bold text-lg text-cyan-300">Short-term Memory</h3>
+                    </div>
+                    <p class="text-sm text-slate-300 mb-2">AgentState["messages"]</p>
+                    <p class="text-xs text-slate-400">Konuşma geçmişi, son 6-10 mesaj, anlık RAM'de tutulur</p>
+                </div>
+                <div class="glass-panel rounded-2xl p-6 border border-purple-500/30">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-10 h-10 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-lg flex items-center justify-center">
+                            <i class="fas fa-database text-white"></i>
+                        </div>
+                        <h3 class="font-bold text-lg text-purple-300">Long-term Memory</h3>
+                    </div>
+                    <p class="text-sm text-slate-300 mb-2">SQLite Checkpointer</p>
+                    <p class="text-xs text-slate-400">data/checkpoints.sqlite, thread-based kalıcı depolama</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Example Flow -->
+        <section class="mb-16">
+            <h2 class="text-2xl font-semibold text-center mb-8 text-white">
+                <i class="fas fa-project-diagram mr-2"></i>Örnek Akış: "Sergen Yalçın kimdir?"
+            </h2>
+            <div class="max-w-3xl mx-auto space-y-4">
+                
+                <!-- Step 1 -->
+                <div class="flex items-center gap-4 p-4 rounded-xl glass-panel border-l-4 border-indigo-500">
+                    <div class="w-10 h-10 rounded-full bg-indigo-500 flex items-center justify-center text-white font-bold">1</div>
+                    <div>
+                        <h4 class="font-bold text-indigo-300">Supervisor Routing</h4>
+                        <p class="text-sm text-slate-300">Kullanıcı bilgi sorusu sordu → <span class="text-emerald-400 font-bold">RESEARCH</span> agent'ına gönder</p>
+                    </div>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="flex items-center gap-4 p-4 rounded-xl glass-panel border-l-4 border-emerald-500">
+                    <div class="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center text-white font-bold">2</div>
+                    <div>
+                        <h4 class="font-bold text-emerald-300">Research Tool Seçimi</h4>
+                        <p class="text-sm text-slate-300">Research Agent seçti: <span class="text-emerald-400 font-bold">wiki_search(query="Sergen Yalçın")</span></p>
+                    </div>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="flex items-center gap-4 p-4 rounded-xl glass-panel border-l-4 border-pink-500">
+                    <div class="w-10 h-10 rounded-full bg-pink-500 flex items-center justify-center text-white font-bold">3</div>
+                    <div>
+                        <h4 class="font-bold text-pink-300">Tool Yürütme</h4>
+                        <p class="text-sm text-slate-300">wiki_search çalıştırıldı (güvenli tool → onay gerekmedi)</p>
+                    </div>
+                </div>
+
+                <!-- Step 4 -->
+                <div class="flex items-center gap-4 p-4 rounded-xl glass-panel border-l-4 border-indigo-500">
+                    <div class="w-10 h-10 rounded-full bg-indigo-500 flex items-center justify-center text-white font-bold">4</div>
+                    <div>
+                        <h4 class="font-bold text-indigo-300">Supervisor Cevap Üretimi</h4>
+                        <p class="text-sm text-slate-300">Tool sonucu var → Doğrudan cevap ver: <span class="text-white">"Sergen Yalçın, 5 Kasım 1972 doğumlu..."</span></p>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="text-center mt-16 pb-8 text-slate-500 text-sm">
+        <p>Multi-Agent System with LangGraph + Turkish-Gemma-9b</p>
+        <p class="mt-1">GitHub: Fatih-Haslak/Agent</p>
+    </footer>
+
+    <script>
+        // Simple interactivity
+        document.querySelectorAll('.node-card').forEach(card => {
+            card.addEventListener('click', () => {
+                card.style.transform = 'scale(0.98)';
+                setTimeout(() => {
+                    card.style.transform = '';
+                }, 150);
+            });
+        });
+    </script>
+</body>
+</html>
