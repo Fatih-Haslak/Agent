@@ -26,12 +26,13 @@ def test_conversation():
         "Atatürk kimdir?",
     ]
     
-    config = {"configurable": {"thread_id": "test-session"}}
-    
     for i, query in enumerate(tests, 1):
         print(f"\n{'─' * 60}")
         print(f"🧑 TEST {i}/{len(tests)}: {query}")
         print("─" * 60)
+        
+        # Her test için YENİ thread_id (önceki konuşmaları karıştırmamak için)
+        config = {"configurable": {"thread_id": f"test-session-{i}"}}
         
         state = {
             "messages": [HumanMessage(content=query)],
@@ -43,16 +44,20 @@ def test_conversation():
         }
         
         final_answer = None
+        trace = []
         for event in graph.stream(state, config):
             for node_name, node_state in event.items():
                 if node_name.startswith("__"):
                     continue
+                trace.append(node_name.upper())
                 print(f"   → {node_name.upper()}: çalıştı")
                 if node_state.get("final_answer"):
                     final_answer = node_state["final_answer"]
         
+        print(f"\n   İzleme: {' → '.join(trace)}")
+        
         if final_answer:
-            print(f"\n🤖 YANIT: {final_answer[:200]}...")
+            print(f"\n🤖 YANIT: {final_answer[:300]}...")
         else:
             print("\n⚠️ Yanıt üretilemedi.")
     

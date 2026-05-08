@@ -9,21 +9,28 @@ Kullanılabilir araçlar:
 - web_search(query: str, max_results: int = 3)
 - summarize(text: str, max_words: int = 100)
 
-KURAL: Eğer araç kullanman gerekiyorsa, KESİNLİKLE aşağıdaki JSON formatında tool çağrısı yap.
-Eğer araç kullanmana gerek yoksa, doğrudan kısa yanıt ver.
+KURAL:
+1. EĞER konuşma geçmişinde zaten bir web_search SONUCU varsa (ToolMessage veya arama sonuçları):
+   - Bu sonuçları kullanarak doğrudan kullanıcıya cevap ver.
+   - TEKRAR web_search veya summarize çağrısı yapma!
+   - Sonuçları analiz et, önemli bilgileri çıkar, Türkçe olarak cevapla.
+
+2. EĞER henüz araştırma yapılmadıysa:
+   - Araç kullanman gerekiyorsa, KESİNLİKLE JSON formatında tool çağrısı yap.
 
 DOĞRU ÖRNEK (araç kullanımı):
 {"tool": "web_search", "args": {"query": "Atatürk kimdir", "max_results": 3}}
 
-DOĞRU ÖRNEK (doğrudan yanıt):
-Atatürk, Türkiye Cumhuriyeti'nin kurucusudur.
+DOĞRU ÖRNEK (sonucu değerlendirme):
+Web arama sonuçlarına göre Mustafa Kemal Atatürk, Türkiye Cumhuriyeti'nin kurucusudur...
 
 YANLIŞ ÖRNEKLER (ASLA YAPMA):
-- Arama yapacağım: {"tool": ...}  ← JSON öncesi metin yazma!
-- {"tool": "web_search", "args": {"query": "..."}} İşte sonuçlar:  ← JSON sonrası metin yazma!
-- web_search(query="...")  ← fonksiyon çağrısı yazma, JSON formatı kullan!
+- Tekrar araç çağrısı yapmak (eğer zaten sonuç varsa)
+- {"tool": "web_search", ...} Sonuç: ...  ← JSON ve metin karıştırma
 
-ÖNEMLİ: Tool çağrısı yapacaksan SADECE JSON yaz. Doğrudan yanıt vereceksen SADECE yanıtını yaz."""
+ÖNEMLİ: 
+- Zaten araştırma sonucu varsa SADECE cevap ver.
+- Araştırma yoksa SADECE JSON yaz."""
 
 
 def research_node(state: AgentState):
@@ -31,15 +38,15 @@ def research_node(state: AgentState):
     llm = get_llm_engine()
     messages = state["messages"]
     context = ""
-    for m in messages[-8:]:
+    for m in messages[-10:]:
         role = getattr(m, 'type', 'unknown')
         content = getattr(m, 'content', str(m))
-        context += f"{role}: {content}\n"
+        context += f"{role}: {content[:500]}\n"
 
-    user_prompt = f"Konuşma geçmişi:\n{context}\n\nGörevi tamamla. Tool kullanacaksan SADECE JSON yaz."
-    raw = llm.chat(RESEARCH_PROMPT, user_prompt, max_new_tokens=300, temperature=0.1)
+    user_prompt = f"Konuşma geçmişi:\n{context}\n\nGörevi tamamla. Zaten araştırma sonucu varsa onu kullan. Yoksa SADECE JSON yaz."
+    raw = llm.chat(RESEARCH_PROMPT, user_prompt, max_new_tokens=512, temperature=0.3)
 
-    # Önce JSON ara
+    # Önce JSON ara (yeni araştırma)
     tool_call = extract_json(raw)
     if tool_call and "tool" in tool_call:
         return {
@@ -48,7 +55,7 @@ def research_node(state: AgentState):
             "current_agent": "research"
         }
 
-    # JSON bulunamadıysa, doğrudan yanıt olarak kabul et
+    # JSON bulunamadıysa, doğrudan yanıt olarak kabul et (sonuç değerlendirme)
     return {
         "messages": [AIMessage(content=raw)],
         "tool_calls": [],

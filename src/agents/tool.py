@@ -9,20 +9,28 @@ Kullanılabilir araçlar:
 - calculator(expression: str)  → Matematiksel ifadeyi hesaplar
 - http_request(method: str, url: str, headers: Optional[str] = None, body: Optional[str] = None) → HTTP isteği gönderir
 
-KURAL: Eğer araç kullanman gerekiyorsa, KESİNLİKLE aşağıdaki JSON formatında tool çağrısı yap.
-Eğer araç kullanmana gerek yoksa, doğrudan yanıt ver.
+KURAL:
+1. EĞER konuşma geçmişinde zaten bir calculator veya http_request SONUCU varsa (ToolMessage ile sonuç):
+   - Bu sonucu kullanarak doğrudan kullanıcıya cevap ver.
+   - TEKRAR calculator veya http_request çağrısı yapma!
+   - Sonucu açıkla, Türkçe olarak cevapla.
+
+2. EĞER henüz hesaplama yapılmadıysa:
+   - Araç kullanman gerekiyorsa, KESİNLİKLE JSON formatında tool çağrısı yap.
 
 DOĞRU ÖRNEK (araç kullanımı):
-{"tool": "calculator", "args": {"expression": "15 * 23 + 7"}}
+{"tool": "calculator", "args": {"expression": "15 * 23"}}
 
-DOĞRU ÖRNEK (doğrudan yanıt):
-15 çarpı 23, 345 eder.
+DOĞRU ÖRNEK (sonucu değerlendirme):
+15 ile 23'ü çarptığımızda 345 eder. Bu sonuç...
 
 YANLIŞ ÖRNEKLER (ASLA YAPMA):
-- Hesaplayalım: {"tool": ...}  ← JSON öncesi metin yazma!
+- Tekrar araç çağrısı yapmak (eğer zaten sonuç varsa)
 - calculator(15*23)  ← fonksiyon çağrısı yazma!
 
-ÖNEMLİ: Tool çağrısı yapacaksan SADECE tek satır JSON yaz. Doğrudan yanıt vereceksen SADECE yanıtını yaz."""
+ÖNEMLİ: 
+- Zaten hesaplama sonucu varsa SADECE cevap ver.
+- Hesaplama yoksa SADECE JSON yaz."""
 
 
 def tool_agent_node(state: AgentState):
@@ -30,12 +38,12 @@ def tool_agent_node(state: AgentState):
     llm = get_llm_engine()
     messages = state["messages"]
     context = ""
-    for m in messages[-8:]:
+    for m in messages[-10:]:
         role = getattr(m, 'type', 'unknown')
         content = getattr(m, 'content', str(m))
-        context += f"{role}: {content}\n"
+        context += f"{role}: {content[:500]}\n"
 
-    user_prompt = f"Konuşma geçmişi:\n{context}\n\nGörevi tamamla. Tool kullanacaksan SADECE JSON yaz."
+    user_prompt = f"Konuşma geçmişi:\n{context}\n\nGörevi tamamla. Zaten hesaplama sonucu varsa onu kullan. Yoksa SADECE JSON yaz."
     raw = llm.chat(TOOL_PROMPT, user_prompt, max_new_tokens=200, temperature=0.0)
 
     tool_call = extract_json(raw)
