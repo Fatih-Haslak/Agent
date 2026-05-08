@@ -96,7 +96,6 @@ def process_message(message: str, history: List[Dict[str, str]], session_id: str
         }
         
         session.current_trace = []
-        final_answer = None
         
         for event in graph.stream(state, session.config):
             for node_name, node_state in event.items():
@@ -118,28 +117,27 @@ def process_message(message: str, history: List[Dict[str, str]], session_id: str
                     session.current_trace.append(f"⛔ Interrupt: {value.get('tool_name', 'unknown')}")
                     status = f"⛔ ONAY GEREKLİ: {value.get('tool_name', 'unknown')} - 'evet' veya 'hayır' yazın"
                     return session.history, format_trace(session.current_trace), status
-                
-                # Final answer
-                if node_state.get("final_answer"):
-                    final_answer = node_state["final_answer"]
+        
+        # Döngü bitti, state objesi LangGraph tarafından değiştirildi
+        # final_answer state'in içinde olabilir
+        final_answer = state.get("final_answer")
+        
+        # Eğer final_answer yoksa, son AI mesajını yakala
+        if not final_answer:
+            for m in reversed(state.get("messages", [])):
+                content = getattr(m, 'content', '')
+                # Sadece gerçek yanıt mesajlarını al (supervisor etiketlerini atla)
+                if content and not content.startswith("[") and len(content) > 5:
+                    final_answer = content
+                    break
         
         # Cevabı history'ye ekle
         if final_answer:
             session.history.append({"role": "user", "content": message})
             session.history.append({"role": "assistant", "content": final_answer})
         else:
-            # Son mesajlardan yanıtı çıkar
-            for m in reversed(state.get("messages", [])):
-                content = getattr(m, 'content', '')
-                if content and not content.startswith("[") and len(content) > 10:
-                    final_answer = content
-                    break
-            if final_answer:
-                session.history.append({"role": "user", "content": message})
-                session.history.append({"role": "assistant", "content": final_answer})
-            else:
-                session.history.append({"role": "user", "content": message})
-                session.history.append({"role": "assistant", "content": "Yanıt üretilemedi."})
+            session.history.append({"role": "user", "content": message})
+            session.history.append({"role": "assistant", "content": "Yanıt üretilemedi."})
         
         trace_text = format_trace(session.current_trace)
         status = "✅ Yanıt hazır."
@@ -259,7 +257,7 @@ def main():
     demo = create_ui()
     demo.launch(
         server_name="0.0.0.0",
-        server_port=7861,
+        server_port=7862,
         share=False,
         show_error=True,
     )
