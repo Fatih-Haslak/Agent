@@ -1,16 +1,6 @@
-from typing import Literal
-from pydantic import BaseModel, Field
-from langchain_core.messages import SystemMessage, AIMessage
-from src.config import get_llm
+from langchain_core.messages import AIMessage
+from src.config import get_llm_engine, extract_json
 from src.state import AgentState
-
-
-class RoutingDecision(BaseModel):
-    """Supervisor'ın routing kararı."""
-    next: Literal["research", "code", "tool", "finish"] = Field(
-        description="Hangi agent'ın çalışması gerektiği: research, code, tool, veya finish"
-    )
-    reason: str = Field(description="Kararın gerekçesi")
 
 
 SUPERVISOR_PROMPT = """Sen bir Supervisor Agent'sın. Kullanıcının isteğini analiz eder ve en uygun uzman agent'a yönlendirirsin.
@@ -21,50 +11,56 @@ Mevcut agent'lar:
 - tool: Matematiksel hesaplama, API çağrıları, veri işleme
 - finish: Görev tamamlandı, nihai yanıt hazır
 
-Karar verirken şunları dikkate al:
-1. Görevin doğası (bilgi mi, kod mu, hesaplama mı?)
-2. Önceki adımlar ve mevcut durum
-3. Eğer yeterli bilgi toplandıysa ve nihai yanıt verilebiliyorsa 'finish' seç
+Kararını JSON formatında ver:
+{"next": "research|code|tool|finish", "reason": "kısa gerekçe"}
 
-Önemli: Sadece 'next' ve 'reason' alanlarını doldur."""
+Önemli: Sadece JSON çıktısı ver."""
 
 MAX_ITERATIONS = 10
 
 
 def supervisor_node(state: AgentState):
-    """Supervisor node: Görevi analiz eder, routing kararı verir, yanıt birleştirir."""
-    llm = get_llm(temperature=0)
-    messages = [SystemMessage(content=SUPERVISOR_PROMPT)] + state["messages"]
-    
+    """Supervisor node: Görevi analiz eder, routing kararı verir."""
+    llm = get_llm_engine()
     iteration = state.get("iteration_count", 0)
+
     if iteration > MAX_ITERATIONS:
         return {
             "final_answer": "Maksimum iterasyon sayısına ulaşıldı. Lütfen daha spesifik bir istekte bulunun.",
             "current_agent": "finish",
-            "iteration_count": iteration + 1
+            "iteration_count": iteration + 1,
+            "messages": [AIMessage(content="Maksimum iterasyona ulaşıldı.")]
         }
-    
-    try:
-        decision = llm.with_structured_output(RoutingDecision).invoke(messages)
-    except Exception as e:
-        # Fallback: düz metin yanıt
+
+    messages = state["messages"]
+    context = ""
+    for m in messages[-6:]:
+        role = getattr(m, 'type', 'unknown')
+        content = getattr(m, 'content', str(m))
+        context += f"{role}: {content}\n"
+
+    user_prompt = f"Konuşma geçmişi:\n{context}\n\nRouting kararını ver."
+    raw = llm.chat(SUPERVISOR_PROMPT, user_prompt, max_new_tokens=100, temperature=0.1)
+
+    decision = extract_json(raw) or {}
+    next_agent = decision.get("next", "finish")
+    reason = decision.get("reason", "varsayılan")
+
+    if next_agent not in ("research", "code", "tool", "finish"):
+        next_agent = "finish"
+
+    if next_agent == "finish":
+        final_prompt = "Yukarıdaki konuşma geçmişine dayanarak kullanıcıya nihai yanıtı ver."
+        final = llm.chat_with_history(SUPERVISOR_PROMPT, final_prompt, messages, max_new_tokens=512, temperature=0.7)
         return {
+            "final_answer": final,
             "current_agent": "finish",
-            "final_answer": f"Routing hatası: {str(e)}",
+            "messages": [AIMessage(content=final)],
             "iteration_count": iteration + 1
         }
-    
-    if decision.next == "finish":
-        final = llm.invoke(messages)
-        return {
-            "final_answer": final.content,
-            "current_agent": "finish",
-            "messages": [final],
-            "iteration_count": iteration + 1
-        }
-    
+
     return {
-        "current_agent": decision.next,
-        "messages": [AIMessage(content=f"[Supervisor] Karar: {decision.next}. Gerekçe: {decision.reason}")],
+        "current_agent": next_agent,
+        "messages": [AIMessage(content=f"[Supervisor] Karar: {next_agent}. Gerekçe: {reason}")],
         "iteration_count": iteration + 1
     }

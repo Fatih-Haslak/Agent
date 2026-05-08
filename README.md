@@ -1,6 +1,6 @@
-# Multi-Agent System with LangGraph
+# Multi-Agent System with LangGraph + Turkish-Gemma-9b
 
-Diagramdaki mimariye tam uygun, **LangGraph** tabanlı çoklu agent sistemi.
+Diagramdaki mimariye tam uygun, **LangGraph** tabanlı çoklu agent sistemi. Şimdi **lokal Turkish-Gemma-9b** modeli ile çalışıyor!
 
 ## 🏗️ Mimarisi
 
@@ -20,6 +20,15 @@ Interrupt Node    →  Human-in-the-loop onay (evet/hayır)
 Yanıt → Kullanıcı
 ```
 
+## 🤖 Model
+
+| Özellik | Değer |
+|---------|-------|
+| Model | `ytu-ce-cosmos/Turkish-Gemma-9b-v0.1` |
+| Kuantizasyon | 4-bit BitsAndBytes (NF4, double_quant) |
+| compute_dtype | `torch.float16` |
+| Framework | PyTorch + HuggingFace Transformers |
+
 ## 🧠 Bellek Katmanı
 
 - **Short-term Memory**: `AgentState["messages"]` içinde tutulur, `add_messages` reducer ile yönetilir.
@@ -27,10 +36,19 @@ Yanıt → Kullanıcı
 
 ## 🚀 Kurulum
 
+### Gereksinimler
+- Python 3.10+
+- CUDA destekli GPU (önerilen)
+- 8 GB+ VRAM (4-bit kuantizasyon ile)
+
+### Bağımlılıklar
+
 ```bash
+# Conda env önerilir (Python 3.11)
+conda create -n agent_env python=3.11
+conda activate agent_env
+
 pip install -r requirements.txt
-cp .env.example .env
-# .env dosyasına OPENAI_API_KEY'i ekle
 ```
 
 ## 🖥️ Çalıştırma
@@ -38,6 +56,8 @@ cp .env.example .env
 ```bash
 python src/main.py
 ```
+
+İlk çalıştırmada model Hugging Face'den otomatik indirilecektir (~5-6 GB).
 
 ## 📂 Proje Yapısı
 
@@ -49,7 +69,7 @@ src/
 ├── memory/           # Short-term & Long-term memory
 ├── graph/            # LangGraph StateGraph & workflow
 ├── state/            # AgentState (TypedDict)
-├── config.py         # LLM yapılandırması
+├── config.py         # LLM yapılandırması (ModelLoader + LLMEngine)
 └── main.py           # CLI entry point
 ```
 

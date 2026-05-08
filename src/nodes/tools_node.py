@@ -1,4 +1,4 @@
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import ToolMessage, AIMessage
 from src.state import AgentState
 from src.tools.executor import execute_tool, is_critical
 
@@ -11,14 +11,11 @@ def tools_execution_node(state: AgentState):
     """
     tool_calls = state.get("tool_calls", [])
     if not tool_calls:
-        return {"current_agent": "supervisor", "tool_calls": []}
+        return {"current_agent": "supervisor", "tool_calls": [], "messages": []}
     
-    # İlk tool call'ı işle (sırayla)
-    # Çoklu tool call desteği için loop kullanılabilir, 
-    # ancak şimdilik ilk kritik olanı yakalama stratejisi uyguluyoruz.
     pending = None
     safe_results = []
-    safe_ids = []
+    safe_messages = []
     
     for tc in tool_calls:
         if is_critical(tc):
@@ -30,23 +27,21 @@ def tools_execution_node(state: AgentState):
             except Exception as e:
                 result = f"Tool hatası ({tc.get('name')}): {str(e)}"
             safe_results.append(result)
-            safe_ids.append(tc.get("id", "unknown"))
-    
-    # Güvenli tool sonuçlarını messages'a ekle
-    messages = []
-    for res, tid in zip(safe_results, safe_ids):
-        messages.append(ToolMessage(content=str(res), tool_call_id=tid))
+            safe_messages.append(ToolMessage(
+                content=str(result),
+                tool_call_id=tc.get("id", "unknown")
+            ))
     
     if pending:
         return {
-            "messages": messages,
+            "messages": safe_messages,
             "tool_calls": [],
             "pending_tool": pending,
             "current_agent": "tools"
         }
     
     return {
-        "messages": messages,
+        "messages": safe_messages,
         "tool_calls": [],
         "pending_tool": None,
         "current_agent": "supervisor"

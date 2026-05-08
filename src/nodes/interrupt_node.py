@@ -5,11 +5,7 @@ from src.tools.executor import execute_tool
 
 
 def interrupt_node(state: AgentState):
-    """Interrupt Node: Kritik tool çağrıları öncesi human-in-the-loop onay ister.
-    
-    LangGraph 'interrupt' fonksiyonu graph'ı durdurur ve dışarıdan 
-    Command(resume=...) ile devam edilmesini bekler.
-    """
+    """Interrupt Node: Kritik tool çağrıları öncesi human-in-the-loop onay ister."""
     pending = state.get("pending_tool")
     if not pending:
         return {}

@@ -1,29 +1,44 @@
-from langchain_core.messages import SystemMessage
-from src.config import get_llm
+from langchain_core.messages import AIMessage
+from src.config import get_llm_engine, extract_json
 from src.state import AgentState
-from src.tools import calculator, http_request
 
 
 TOOL_PROMPT = """Sen bir Tool Agent'sın. Matematiksel hesaplama ve HTTP istekleri yaparsın.
 
 Kullanılabilir araçlar:
-- calculator: Matematiksel ifadeleri güvenli bir şekilde hesaplar
-- http_request: HTTP GET/POST/PUT/DELETE istekleri gönderir (kritik, onay gerektirir)
+- calculator: Matematiksel ifadeleri hesaplar. Argüman: {"expression": "2+2"}
+- http_request: HTTP isteği gönderir (kritik, onay gerektirir). Argüman: {"method": "GET", "url": "https://..."}
 
-Kurallar:
-1. Hesaplama sonuçlarını net ve anlaşılır şekilde sun.
-2. HTTP isteklerinde URL ve parametreleri doğrula.
-3. API yanıtlarını özetle."""
+Eğer araç kullanman gerekiyorsa, JSON formatında tool çağrısı yap:
+{"tool": "calculator", "args": {"expression": "15 * 23"}}
+
+Eğer araç kullanmana gerek yoksa, doğrudan yanıt ver.
+Yanıtın başında JSON kullanma, doğrudan cevap ver."""
 
 
 def tool_agent_node(state: AgentState):
     """Tool node: Hesaplama ve HTTP istekleri yapar."""
-    llm = get_llm(temperature=0).bind_tools([calculator, http_request])
-    messages = [SystemMessage(content=TOOL_PROMPT)] + state["messages"]
-    response = llm.invoke(messages)
-    
+    llm = get_llm_engine()
+    messages = state["messages"]
+    context = ""
+    for m in messages[-8:]:
+        role = getattr(m, 'type', 'unknown')
+        content = getattr(m, 'content', str(m))
+        context += f"{role}: {content}\n"
+
+    user_prompt = f"Konuşma geçmişi:\n{context}\n\nGörevi tamamla."
+    raw = llm.chat(TOOL_PROMPT, user_prompt, max_new_tokens=200, temperature=0.1)
+
+    tool_call = extract_json(raw)
+    if tool_call and "tool" in tool_call:
+        return {
+            "messages": [AIMessage(content=raw)],
+            "tool_calls": [{"name": tool_call["tool"], "args": tool_call.get("args", {}), "id": "tc_tool"}],
+            "current_agent": "tool"
+        }
+
     return {
-        "messages": [response],
-        "tool_calls": response.tool_calls if hasattr(response, "tool_calls") else [],
+        "messages": [AIMessage(content=raw)],
+        "tool_calls": [],
         "current_agent": "tool"
     }

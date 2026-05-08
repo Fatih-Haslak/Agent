@@ -1,16 +1,14 @@
 import os
 import sys
-from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage
-from langgraph.types import Command
 
 # Proje kökünü Python path'e ekle
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from langchain_core.messages import HumanMessage
+from langgraph.types import Command
+
 from src.graph import graph
-
-
-load_dotenv()
+from src.config import get_llm_engine
 
 
 def handle_stream(stream, config):
@@ -24,14 +22,11 @@ def handle_stream(stream, config):
             value = interrupt_info.value
             print(f"\n⛔ ONAY GEREKLİ")
             print(f"   {value.get('message', '')}")
-            print(f"   Tool : {value.get('tool_name')}")
-            print(f"   Args : {value.get('args', {})}")
             
             approval = input("\nOnaylıyor musunuz? (evet/hayır): ").strip()
             
             # Resume with user decision
             resume_stream = graph.stream(Command(resume=approval), config)
-            # Recursive handle
             inner_answer = handle_stream(resume_stream, config)
             if inner_answer:
                 final_answer = inner_answer
@@ -50,12 +45,17 @@ def handle_stream(stream, config):
 
 def main():
     print("=" * 60)
-    print("🤖 Multi-Agent System (LangGraph)")
+    print("🤖 Multi-Agent System (LangGraph + Turkish-Gemma-9b)")
     print("   Supervisor → Research | Code | Tool")
+    print("   Model: ytu-ce-cosmos/Turkish-Gemma-9b-v0.1")
     print("   Memory: Short-term (state) + Long-term (SQLite)")
-    print("   Interrupt: Human-in-the-loop onay")
     print("=" * 60)
-    print("Çıkmak için 'exit' yazın.\n")
+    
+    # Modeli önceden yükle (lazy init)
+    print("\n📥 LLM hazırlanıyor...")
+    get_llm_engine()
+    
+    print("\nÇıkmak için 'exit' yazın.\n")
     
     thread_id = "default-session"
     config = {"configurable": {"thread_id": thread_id}}
