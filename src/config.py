@@ -117,10 +117,21 @@ class LLMEngine:
         ]
         return self.generate(messages, max_new_tokens, temperature)
 
-    def chat_with_history(self, system_prompt: str, user_prompt: str, history: List[Dict[str, str]], max_new_tokens: int = 256, temperature: float = 0.7) -> str:
+    def chat_with_history(self, system_prompt: str, user_prompt: str, history, max_new_tokens: int = 256, temperature: float = 0.7) -> str:
         messages = [{"role": "system", "content": system_prompt}]
         if history:
-            messages.extend(history)
+            for msg in history:
+                if isinstance(msg, dict):
+                    messages.append(msg)
+                else:
+                    # LangChain message object
+                    role = getattr(msg, 'type', 'user')
+                    if role == 'human':
+                        role = 'user'
+                    elif role == 'ai':
+                        role = 'assistant'
+                    content = getattr(msg, 'content', str(msg))
+                    messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": user_prompt})
         return self.generate(messages, max_new_tokens, temperature)
 
