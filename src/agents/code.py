@@ -3,34 +3,31 @@ from src.config import get_llm_engine, extract_json
 from src.state import AgentState
 
 
-CODE_PROMPT = """Sen bir Code Agent'sın. Kod yazma, çalıştırma ve düzeltme işlemleri yaparsın.
+CODE_PROMPT = """Sen bir Code Agent'sın. Kullanıcının istediği kodu yazarsın ve çalıştırırsın.
 
-Kullanılabilir araçlar:
-- code_exec(language: str, code: str, timeout: int = 10)
-- file_io(action: str, file_path: str, content: Optional[str] = None)
+Mevcut araçların:
+- code_exec(language, code): Kodu çalıştırır
+- file_io(action, file_path, content): Dosya işlemleri
 
 KURAL:
-1. EĞER konuşma geçmişinde zaten bir code_exec veya file_io SONUCU varsa (ToolMessage ile çalıştırma sonucu):
-   - Bu sonucu kullanarak doğrudan kullanıcıya cevap ver.
-   - TEKRAR code_exec veya file_io çağrısı yapma!
-   - Sonucu analiz et, açıkla, Türkçe olarak cevapla.
+1. Kullanıcı kod istediğinde, ÖNCE code_exec ile kodu ÇALIŞTIR.
+2. Kodu doğrudan yazıp cevap verme! code_exec toolunu KULLAN.
+3. SADECE aşağıdaki JSON formatında tool çağrısı yap:
 
-2. EĞER henüz kod çalıştırılmadıysa:
-   - Araç kullanman gerekiyorsa, KESİNLİKLE JSON formatında tool çağrısı yap.
+DOĞRU ÖRNEK (kod çalıştırma):
+{"tool": "code_exec", "args": {"language": "python", "code": "for i in range(5): print(i)"}}
 
-DOĞRU ÖRNEK (araç kullanımı):
-{"tool": "code_exec", "args": {"language": "python", "code": "print(1+1)"}}
+DOĞRU ÖRNEK (dosya yazma):
+{"tool": "file_io", "args": {"action": "write", "file_path": "merhaba.py", "content": "print('Merhaba')"}}
 
-DOĞRU ÖRNEK (sonucu değerlendirme):
-Kod çalıştırıldı ve sonuç 2 olarak döndü. Bu işlem...
-
-YANLIŞ ÖRNEKLER (ASLA YAPMA):
-- Tekrar araç çağrısı yapmak (eğer zaten sonuç varsa)
-- ```json\n{...}\n```  ← kod bloğu kullanma!
+YANLIŞ ÖRNEK (ASLA YAPMA):
+- Doğrudan kod yazıp cevap verme!
+- Markdown kod bloğu kullanma!
+- Fonksiyon çağrısı yazma, SADECE JSON!
 
 ÖNEMLİ: 
-- Zaten çalıştırma sonucu varsa SADECE cevap ver.
-- Çalıştırma yoksa SADECE JSON yaz."""
+- Kod istendiğinde SADECE JSON yaz.
+- Araç kullanmana gerek yoksa (doğrudan yanıt) SADECE yanıtını yaz."""
 
 
 def code_node(state: AgentState):
@@ -38,14 +35,15 @@ def code_node(state: AgentState):
     llm = get_llm_engine()
     messages = state["messages"]
     context = ""
-    for m in messages[-10:]:
+    for m in messages[-8:]:
         role = getattr(m, 'type', 'unknown')
         content = getattr(m, 'content', str(m))
-        context += f"{role}: {content[:500]}\n"
+        context += f"{role}: {content}\n"
 
-    user_prompt = f"Konuşma geçmişi:\n{context}\n\nGörevi tamamla. Zaten çalıştırma sonucu varsa onu kullan. Yoksa SADECE JSON yaz."
+    user_prompt = f"Konuşma geçmişi:\n{context}\n\nGörevi tamamla. Kod isteniyorsa SADECE code_exec JSON yaz. Yoksa doğrudan cevap ver."
     raw = llm.chat(CODE_PROMPT, user_prompt, max_new_tokens=400, temperature=0.1)
 
+    # Markdown kod bloklarını da parse et
     tool_call = extract_json(raw)
     if tool_call and "tool" in tool_call:
         return {

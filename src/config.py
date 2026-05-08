@@ -157,11 +157,19 @@ def extract_json(text: str) -> Optional[Dict[str, Any]]:
     if not text:
         return None
     
-    # 1. JSON kod blokları arasından ara (```json ... ```)
+    # 1. JSON kod blokları arasından ara (```json ... ``` veya ``` ... ```)
     code_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', text, re.DOTALL)
     if code_match:
         try:
             return json.loads(code_match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    
+    # 1b. Tek satırlık ```json {...} ``` formatı
+    inline_code = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL)
+    if inline_code:
+        try:
+            return json.loads(inline_code.group(1).strip())
         except json.JSONDecodeError:
             pass
     
