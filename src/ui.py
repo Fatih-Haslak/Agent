@@ -2,6 +2,7 @@
 Gradio Web UI for Multi-Agent System
 =====================================
 Chat interface with agent reasoning display and interrupt handling.
+Compatible with Gradio 6.x
 """
 
 import os
@@ -24,12 +25,13 @@ class ChatSession:
     def __init__(self):
         self.thread_id = "gradio-session"
         self.config = {"configurable": {"thread_id": self.thread_id}}
-        self.history: List[Tuple[str, str]] = []
+        # Gradio 6.x format: [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
+        self.history: List[Dict[str, str]] = []
         self.pending_interrupt: Dict[str, Any] = None
         self.current_trace: List[str] = []
 
 
-# Global session store (simple approach for demo)
+# Global session store
 sessions: Dict[str, ChatSession] = {}
 
 
@@ -38,7 +40,7 @@ def format_trace(trace: List[str]) -> str:
     if not trace:
         return "Henüz çalışma izi yok."
     lines = []
-    for i, step in enumerate(trace, 1):
+    for step in trace:
         emoji = {
             "supervisor": "🗺️",
             "research": "📚",
@@ -52,7 +54,7 @@ def format_trace(trace: List[str]) -> str:
     return "\n".join(lines)
 
 
-def process_message(message: str, session_id: str) -> Tuple[List, str, str]:
+def process_message(message: str, session_id: str) -> Tuple[List[Dict[str, str]], str, str]:
     """Kullanıcı mesajını işler ve yanıt döndürür.
     
     Returns:
@@ -71,20 +73,14 @@ def process_message(message: str, session_id: str) -> Tuple[List, str, str]:
         approval = message.strip().lower()
         is_approved = approval in ("evet", "yes", "e", "y", "true", "1", "onayla")
         
-        # Interrupt'ı resume et
         resume_value = "evet" if is_approved else "hayır"
         stream = graph.stream(Command(resume=resume_value), session.config)
         
         result = _collect_stream(stream, session)
         
-        # Chat history'yi güncelle
-        chat_history = []
-        for user_msg, bot_msg in session.history:
-            chat_history.append([user_msg, bot_msg])
-        
         trace_text = format_trace(session.current_trace)
         status = f"Interrupt {'onaylandı' if is_approved else 'reddedildi'}."
-        return chat_history, trace_text, status
+        return session.history, trace_text, status
     
     # Normal mesaj akışı
     state = {
@@ -101,10 +97,9 @@ def process_message(message: str, session_id: str) -> Tuple[List, str, str]:
     
     result = _collect_stream(stream, session)
     
-    # Yanıtı history'ye ekle
+    # Yanıtı history'ye ekle (Gradio 6.x formatı)
     final_answer = result.get("final_answer", "")
     if not final_answer:
-        # Son mesajlardan yanıtı çıkar
         msgs = result.get("messages", [])
         for m in reversed(msgs):
             content = getattr(m, 'content', str(m))
@@ -112,22 +107,18 @@ def process_message(message: str, session_id: str) -> Tuple[List, str, str]:
                 final_answer = content
                 break
     
-    session.history.append((message, final_answer or "Yanıt üretilemedi."))
-    
-    # Chat history'yi Gradio formatına dönüştür
-    chat_history = []
-    for user_msg, bot_msg in session.history:
-        chat_history.append([user_msg, bot_msg])
+    # Gradio 6.x mesaj formatı
+    session.history.append({"role": "user", "content": message})
+    session.history.append({"role": "assistant", "content": final_answer or "Yanıt üretilemedi."})
     
     trace_text = format_trace(session.current_trace)
     
-    # Interrupt durumunu kontrol et
     if session.pending_interrupt:
         status = f"⛔ ONAY GEREKLİ: {session.pending_interrupt.get('tool_name', 'unknown')}"
     else:
         status = "✅ Yanıt hazır."
     
-    return chat_history, trace_text, status
+    return session.history, trace_text, status
 
 
 def _collect_stream(stream, session: ChatSession) -> Dict[str, Any]:
@@ -135,18 +126,14 @@ def _collect_stream(stream, session: ChatSession) -> Dict[str, Any]:
     result = {}
     
     for event in stream:
-        # Interrupt yakalama
         if "__interrupt__" in event:
             interrupt_info = event["__interrupt__"][0]
             value = interrupt_info.value
             session.pending_interrupt = value
             session.current_trace.append(f"⛔ Interrupt: {value.get('tool_name', 'unknown')}")
-            
-            # Kullanıcıdan onay bekle - Gradio'da sonraki mesajı onay olarak kullanacağız
             result["pending_interrupt"] = True
             break
         
-        # Node state'lerini topla
         for node_name, node_state in event.items():
             if node_name.startswith("__"):
                 continue
@@ -159,7 +146,6 @@ def _collect_stream(stream, session: ChatSession) -> Dict[str, Any]:
             if node_state.get("messages"):
                 result["messages"] = node_state.get("messages", [])
             
-            # Tool çağrılarını izle
             if node_state.get("tool_calls"):
                 for tc in node_state["tool_calls"]:
                     tool_name = tc.get("name", "unknown")
@@ -168,7 +154,7 @@ def _collect_stream(stream, session: ChatSession) -> Dict[str, Any]:
     return result
 
 
-def clear_session(session_id: str) -> Tuple[List, str, str]:
+def clear_session(session_id: str) -> Tuple[List[Dict[str, str]], str, str]:
     """Session'ı temizler."""
     sessions[session_id] = ChatSession()
     return [], "", "✅ Yeni oturum başlatıldı."
@@ -177,7 +163,7 @@ def clear_session(session_id: str) -> Tuple[List, str, str]:
 # ── Gradio UI ─────────────────────────────────────────
 
 def create_ui():
-    with gr.Blocks(title="🤖 Multi-Agent System", theme=gr.themes.Soft()) as demo:
+    with gr.Blocks(title="🤖 Multi-Agent System") as demo:
         gr.Markdown("""
         # 🤖 Multi-Agent System with LangGraph
         
@@ -195,7 +181,7 @@ def create_ui():
                 chatbot = gr.Chatbot(
                     label="💬 Konuşma",
                     height=500,
-                    bubble_full_width=False,
+                    type="messages",
                 )
                 
                 with gr.Row():
