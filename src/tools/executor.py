@@ -1,9 +1,10 @@
 from typing import Dict, Any
-from src.tools import web_search, summarize, code_exec, file_io, calculator, http_request
+from src.tools import web_search, summarize, wiki_search, code_exec, file_io, calculator, http_request
 
 TOOL_MAP = {
     "web_search": web_search,
     "summarize": summarize,
+    "wiki_search": wiki_search,
     "code_exec": code_exec,
     "file_io": file_io,
     "calculator": calculator,

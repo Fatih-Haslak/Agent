@@ -40,6 +40,5 @@ def summarize(text: str, max_words: int = 100) -> str:
     words = text.split()
     if len(words) <= max_words:
         return text
-    # Basit bir özet stratejisi: ilk ve son cümleleri birleştirerek kırp
     summary = " ".join(words[:max_words]) + "..."
     return summary

@@ -3,30 +3,33 @@ from src.config import get_llm_engine, extract_json
 from src.state import AgentState
 
 
-RESEARCH_PROMPT = """Sen bir Research Agent'sın. Web araması yaparak bilgi toplar ve özetlersin.
+RESEARCH_PROMPT = """Sen bir Research Agent'sın. Web veya Wikipedia araması yaparak bilgi toplar ve özetlersin.
 
 Kullanılabilir araçlar:
-- web_search(query: str, max_results: int = 3)
-- summarize(text: str, max_words: int = 100)
+- wiki_search(query: str, max_chars: int = 1500)  → Türkçe Wikipedia'da arama yapar, GÜVENİLİR ve DETAYLI sonuçlar döndürür
+- web_search(query: str, max_results: int = 3)    → Genel web araması yapar
+- summarize(text: str, max_words: int = 100)       → Metni özetler
 
 KURAL:
-1. EĞER konuşma geçmişinde zaten bir web_search SONUCU varsa (ToolMessage veya arama sonuçları):
+1. EĞER konuşma geçmişinde zaten bir wiki_search SONUCU varsa (ToolMessage veya Wikipedia sonucu):
    - Bu sonuçları kullanarak doğrudan kullanıcıya cevap ver.
-   - TEKRAR web_search veya summarize çağrısı yapma!
+   - TEKRAR wiki_search veya web_search çağrısı yapma!
    - Sonuçları analiz et, önemli bilgileri çıkar, Türkçe olarak cevapla.
 
 2. EĞER henüz araştırma yapılmadıysa:
+   - Bilgi sorusu için ÖNCELİKLE wiki_search kullan (Wikipedia daha güvenilir)
+   - Güncel haber/yazılım gibi konularda web_search kullan
    - Araç kullanman gerekiyorsa, KESİNLİKLE JSON formatında tool çağrısı yap.
 
 DOĞRU ÖRNEK (araç kullanımı):
-{"tool": "web_search", "args": {"query": "Atatürk kimdir", "max_results": 3}}
+{"tool": "wiki_search", "args": {"query": "Sergen Yalçın", "max_chars": 1500}}
 
 DOĞRU ÖRNEK (sonucu değerlendirme):
-Web arama sonuçlarına göre Mustafa Kemal Atatürk, Türkiye Cumhuriyeti'nin kurucusudur...
+Sergen Yalçın, 5 Kasım 1972'de İstanbul'da doğan Türk futbol antrenörü ve eski futbolcudur...
 
 YANLIŞ ÖRNEKLER (ASLA YAPMA):
 - Tekrar araç çağrısı yapmak (eğer zaten sonuç varsa)
-- {"tool": "web_search", ...} Sonuç: ...  ← JSON ve metin karıştırma
+- {"tool": "wiki_search", ...} Sonuç: ...  ← JSON ve metin karıştırma
 
 ÖNEMLİ: 
 - Zaten araştırma sonucu varsa SADECE cevap ver.
@@ -34,7 +37,7 @@ YANLIŞ ÖRNEKLER (ASLA YAPMA):
 
 
 def research_node(state: AgentState):
-    """Research node: Web arama ve özetleme işlemleri yapar."""
+    """Research node: Wikipedia ve web arama işlemleri yapar."""
     llm = get_llm_engine()
     messages = state["messages"]
     context = ""
