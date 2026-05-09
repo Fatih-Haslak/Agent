@@ -2,22 +2,40 @@
 Gradio Web UI for Multi-Agent System with Streaming
 ====================================================
 Chat interface with streaming, ReAct pattern, and interrupt handling.
-
-Anti-flicker fixes for Gradio 6.x:
-- bubble_full_width=False on Chatbot
-- Explicit CSS to lock container heights and prevent layout shifts
-- container=False on inner components where possible
 """
 
 import os
 import sys
 import re
 import traceback
-import gradio as gr
-import gradio.networking as networking
 from typing import List, Dict, Any, Generator
 
-# Gradio 4.x Windows localhost erişilebilirlik kontrolünü bypass et
+# ── gradio-client bug fix ────────────────────────────────────────────
+# gradio-client'ta schema=True/False oldugunda get_type() cokuyor.
+# Bu patch her Gradio versiyonunda (4.x, 5.x, 6.x) gerekli.
+import gradio_client.utils as _gcu
+_original_get_type = _gcu.get_type
+
+def _patched_get_type(schema):
+    if not isinstance(schema, dict):
+        return "Any"
+    return _original_get_type(schema)
+
+_gcu.get_type = _patched_get_type
+
+_original_json_schema = _gcu._json_schema_to_python_type
+
+def _patched_json_schema(schema, defs):
+    if schema is True or schema is False or not isinstance(schema, dict):
+        return "Any"
+    return _original_json_schema(schema, defs)
+
+_gcu._json_schema_to_python_type = _patched_json_schema
+
+import gradio as gr
+import gradio.networking as networking
+
+# Windows'ta localhost erişilebilirlik kontrolünü bypass et
 networking.url_ok = lambda x: True
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -259,7 +277,8 @@ def create_ui():
                     label="💬 Konuşma",
                     height=500,
                     elem_classes="chatbot-container",
-                    value=None,
+                    type="messages",
+                    value=[],
                 )
                 
                 with gr.Row():
