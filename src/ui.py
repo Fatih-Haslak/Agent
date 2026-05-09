@@ -236,7 +236,7 @@ body {
 # ── Gradio UI ───────────────────────────────────────────────────────
 
 def create_ui():
-    with gr.Blocks(title="🤖 Multi-Agent System", css=ANTI_FLICKER_CSS) as demo:
+    with gr.Blocks(title="🤖 Multi-Agent System") as demo:
         gr.Markdown("""
         # 🤖 Multi-Agent System with LangGraph
         
@@ -254,11 +254,6 @@ def create_ui():
                 chatbot = gr.Chatbot(
                     label="💬 Konuşma",
                     height=500,
-                    max_height=500,
-                    min_height=500,
-                    bubble_full_width=False,
-                    show_copy_button=False,
-                    container=False,
                     elem_classes="chatbot-container",
                     value=None,
                 )
@@ -275,7 +270,6 @@ def create_ui():
                     label="Durum",
                     interactive=False,
                     value="Hazır. Mesajınızı yazın.",
-                    container=False,
                 )
             
             with gr.Column(scale=1):
@@ -284,7 +278,6 @@ def create_ui():
                     interactive=False,
                     lines=20,
                     value="Henüz çalışma izi yok.",
-                    container=False,
                 )
                 
                 clear_btn = gr.Button("🗑️ Yeni Oturum", variant="secondary")
@@ -344,6 +337,7 @@ def main():
         server_port=7867,
         share=False,
         show_error=True,
+        css=ANTI_FLICKER_CSS,
     )
 
 
