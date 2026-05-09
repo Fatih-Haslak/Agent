@@ -2,6 +2,11 @@
 Gradio Web UI for Multi-Agent System with Streaming
 ====================================================
 Chat interface with streaming, ReAct pattern, and interrupt handling.
+
+Anti-flicker fixes for Gradio 6.x:
+- bubble_full_width=False on Chatbot
+- Explicit CSS to lock container heights and prevent layout shifts
+- container=False on inner components where possible
 """
 
 import os
@@ -76,7 +81,12 @@ def process_message_stream(
     history: List[Dict[str, str]],
     session_id: str
 ) -> Generator[List[Dict[str, str]], str, str]:
-    """Kullanıcı mesajını işler ve graph event'lerini stream eder."""
+    """Kullanıcı mesajını işler ve graph event'lerini stream eder.
+    
+    Chatbot titremesini önlemek için:
+    - Ara adımlarda SADECE status_text ve trace_display güncellenir.
+    - Chatbot'a yalnızca nihai cevap veya interrupt mesajı yazılır.
+    """
 
     # Boş mesaj kontrolü
     if not message or not message.strip():
@@ -93,9 +103,6 @@ def process_message_stream(
 
         current_history = list(history)
         current_history.append({"role": "user", "content": message})
-        placeholder_idx = len(current_history)
-        current_history.append({"role": "assistant", "content": "⏳ Onay işleniyor..."})
-
         yield current_history.copy(), format_trace(session.trace), "🔄 Onay işleniyor..."
 
         try:
@@ -107,19 +114,17 @@ def process_message_stream(
 
                     trace.append(f"{node_name.upper()}: çalıştı")
                     status = f"🔄 {node_name.upper()} çalışıyor..."
-                    current_history[-1] = {"role": "assistant", "content": f"⏳ {status}"}
                     yield current_history.copy(), format_trace(trace), status
 
                     if node_state.get("final_answer"):
                         final = clean_answer(node_state["final_answer"])
-                        current_history[-1] = {"role": "assistant", "content": final}
+                        current_history.append({"role": "assistant", "content": final})
                         session.trace = trace
                         session.pending_interrupt = None
                         yield current_history.copy(), format_trace(trace), "✅ Yanıt hazır."
                         return
 
-            # Eğer final_answer yoksa
-            current_history[-1] = {"role": "assistant", "content": "İşlem tamamlandı."}
+            current_history.append({"role": "assistant", "content": "İşlem tamamlandı."})
             session.trace = trace
             session.pending_interrupt = None
             yield current_history.copy(), format_trace(trace), "✅ İşlem tamamlandı."
@@ -128,7 +133,7 @@ def process_message_stream(
         except Exception as e:
             error_detail = traceback.format_exc()
             print(f"UI HATASI (interrupt resume): {error_detail}")
-            current_history[-1] = {"role": "assistant", "content": f"❌ Hata: {str(e)}"}
+            current_history.append({"role": "assistant", "content": f"❌ Hata: {str(e)}"})
             session.pending_interrupt = None
             yield current_history.copy(), format_trace(session.trace), f"❌ Hata: {str(e)}"
             return
@@ -145,8 +150,6 @@ def process_message_stream(
 
     current_history = list(history)
     current_history.append({"role": "user", "content": message})
-    current_history.append({"role": "assistant", "content": "⏳ Supervisor karar veriyor..."})
-
     yield current_history.copy(), format_trace([]), "🔄 Başlatılıyor..."
 
     try:
@@ -158,7 +161,7 @@ def process_message_stream(
                 value = interrupt_info.value
                 trace.append(f"⛔ Interrupt: {value.get('tool_name', 'unknown')}")
                 status = f"⛔ ONAY GEREKLİ: {value.get('tool_name', 'unknown')} - 'evet' veya 'hayır' yazın"
-                current_history[-1] = {"role": "assistant", "content": status}
+                current_history.append({"role": "assistant", "content": status})
                 session.trace = trace
                 session.pending_interrupt = value
                 yield current_history.copy(), format_trace(trace), status
@@ -175,25 +178,23 @@ def process_message_stream(
                         trace.append(f"   → Tool: {tc.get('name', 'unknown')}")
 
                 status = f"🔄 {node_name.upper()} çalışıyor..."
-                current_history[-1] = {"role": "assistant", "content": f"⏳ {status}"}
                 yield current_history.copy(), format_trace(trace), status
 
                 if node_state.get("final_answer"):
                     final = clean_answer(node_state["final_answer"])
-                    current_history[-1] = {"role": "assistant", "content": final}
+                    current_history.append({"role": "assistant", "content": final})
                     session.trace = trace
                     yield current_history.copy(), format_trace(trace), "✅ Yanıt hazır."
                     return
 
-        # Eğer final_answer hiç set edilmediyse (güvenlik neti)
-        current_history[-1] = {"role": "assistant", "content": "Yanıt üretilemedi."}
+        current_history.append({"role": "assistant", "content": "Yanıt üretilemedi."})
         session.trace = trace
         yield current_history.copy(), format_trace(trace), "⚠️ Yanıt üretilemedi."
 
     except Exception as e:
         error_detail = traceback.format_exc()
         print(f"UI HATASI: {error_detail}")
-        current_history[-1] = {"role": "assistant", "content": f"❌ Hata: {str(e)}"}
+        current_history.append({"role": "assistant", "content": f"❌ Hata: {str(e)}"})
         yield current_history.copy(), format_trace([]), f"❌ Hata: {str(e)}"
 
 
@@ -204,10 +205,38 @@ def clear_chat():
     return [], "", "✅ Yeni oturum başlatıldı."
 
 
+# ── Anti-flicker CSS ────────────────────────────────────────────────
+
+ANTI_FLICKER_CSS = """
+/* Sabit yükseklikler ve taşmayı önle */
+.chatbot-container {
+    min-height: 500px !important;
+    max-height: 500px !important;
+    overflow-y: auto !important;
+}
+
+/* Gradio Chatbot içindeki mesaj baloncuklarının genişliğini sabitle */
+.message-wrap {
+    max-width: 90% !important;
+    word-break: break-word !important;
+}
+
+/* Ana satır yüksekliğini kilitle */
+.main-row {
+    align-items: flex-start !important;
+}
+
+/* Scrollbar genişliğını sabitle, taşmayı engelle */
+body {
+    overflow-x: hidden !important;
+}
+"""
+
+
 # ── Gradio UI ───────────────────────────────────────────────────────
 
 def create_ui():
-    with gr.Blocks(title="🤖 Multi-Agent System") as demo:
+    with gr.Blocks(title="🤖 Multi-Agent System", css=ANTI_FLICKER_CSS) as demo:
         gr.Markdown("""
         # 🤖 Multi-Agent System with LangGraph
         
@@ -220,12 +249,18 @@ def create_ui():
         
         session_state = gr.State(value="default-session")
 
-        with gr.Row():
+        with gr.Row(elem_classes="main-row"):
             with gr.Column(scale=3):
                 chatbot = gr.Chatbot(
                     label="💬 Konuşma",
                     height=500,
-                    value=[],
+                    max_height=500,
+                    min_height=500,
+                    bubble_full_width=False,
+                    show_copy_button=False,
+                    container=False,
+                    elem_classes="chatbot-container",
+                    value=None,
                 )
                 
                 with gr.Row():
@@ -239,7 +274,8 @@ def create_ui():
                 status_text = gr.Textbox(
                     label="Durum",
                     interactive=False,
-                    value="Hazır. Mesajınızı yazın."
+                    value="Hazır. Mesajınızı yazın.",
+                    container=False,
                 )
             
             with gr.Column(scale=1):
@@ -248,6 +284,7 @@ def create_ui():
                     interactive=False,
                     lines=20,
                     value="Henüz çalışma izi yok.",
+                    container=False,
                 )
                 
                 clear_btn = gr.Button("🗑️ Yeni Oturum", variant="secondary")
