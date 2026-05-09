@@ -333,7 +333,7 @@ def main():
     
     demo = create_ui()
     demo.launch(
-        server_name="0.0.0.0",
+        server_name="127.0.0.1",
         server_port=7867,
         share=False,
         show_error=True,
