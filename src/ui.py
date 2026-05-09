@@ -2,7 +2,7 @@
 Gradio Web UI for Multi-Agent System
 =====================================
 Chat interface with agent reasoning display and interrupt handling.
-Compatible with Gradio 6.x - Stable Version
+Compatible with Gradio 6.x
 Uses graph.invoke for reliable execution
 """
 
@@ -10,11 +10,11 @@ import os
 import sys
 import traceback
 import gradio as gr
-from typing import List, Tuple, Dict, Any
+from typing import List, Dict, Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from langgraph.types import Command
 
 from src.graph import graph
@@ -22,13 +22,13 @@ from src.config import get_llm_engine
 
 
 class ChatSession:
-    """Gradio session state wrapper."""
-    
     def __init__(self):
         self.thread_id = f"gradio-session-{id(self)}"
         self.config = {"configurable": {"thread_id": self.thread_id}}
         self.history: List[Dict[str, str]] = []
         self.trace: List[str] = []
+        self.pending_interrupt: Dict[str, Any] = None
+        self.last_state: Dict[str, Any] = None
 
 
 def format_trace(trace: List[str]) -> str:
@@ -44,56 +44,37 @@ def format_trace(trace: List[str]) -> str:
     return "\n".join(lines)
 
 
-def _run_graph(state: Dict[str, Any], config: Dict[str, Any], session: ChatSession, approval: str = None):
-    """Graph'ı çalıştırır ve sonucu döndürür.
+def get_answer_from_state(state: Dict[str, Any]) -> str:
+    """State'ten en iyi yanıtı çıkarır."""
+    # 1. final_answer var mı?
+    final = state.get("final_answer")
+    if final and len(str(final)) > 5:
+        return str(final)
     
-    Returns: (final_answer, trace_list, interrupt_info or None)
-    """
-    trace = []
+    # 2. Son AI mesajını bul
+    messages = state.get("messages", [])
+    for m in reversed(messages):
+        if isinstance(m, AIMessage):
+            content = getattr(m, 'content', '')
+            if content and len(content) > 5 and not content.startswith("["):
+                # JSON çıktısını temizle
+                import re
+                cleaned = re.sub(r'\{[\s\S]*?\}\s*$', '', content).strip()
+                if cleaned:
+                    return cleaned
+                return content
     
-    try:
-        # Eğer onay varsa, resume et
-        if approval:
-            stream = graph.stream(Command(resume=approval), config)
-        else:
-            stream = graph.stream(state, config)
-        
-        for event in stream:
-            for node_name, node_state in event.items():
-                if node_name.startswith("__"):
-                    continue
-                
-                trace.append(f"{node_name.upper()}: çalıştı")
-                
-                # Tool çağrılarını izle
-                if node_state.get("tool_calls"):
-                    for tc in node_state["tool_calls"]:
-                        trace.append(f"   → Tool: {tc.get('name', 'unknown')}")
-                
-                # Interrupt yakalama
-                if "__interrupt__" in event:
-                    interrupt_info = event["__interrupt__"][0]
-                    value = interrupt_info.value
-                    trace.append(f"⛔ Interrupt: {value.get('tool_name', 'unknown')}")
-                    return None, trace, value
-                
-                # Final answer
-                if node_state.get("final_answer"):
-                    return node_state["final_answer"], trace, None
-        
-        # Eğer final_answer event'te yakalanmadıysa, state'i kontrol et
-        final = state.get("final_answer")
-        if final:
-            return final, trace, None
-        
-        return None, trace, None
-        
-    except Exception as e:
-        trace.append(f"❌ Hata: {str(e)}")
-        return None, trace, None
+    # 3. Son mesaj herhangi bir tür
+    if messages:
+        last = messages[-1]
+        content = getattr(last, 'content', str(last))
+        if content and len(content) > 5:
+            return content
+    
+    return None
 
 
-def process_message(message: str, history: List[Dict[str, str]], session_id: str) -> Tuple[List[Dict[str, str]], str, str]:
+def process_message(message: str, history: List[Dict[str, str]], session_id: str):
     """Kullanıcı mesajını işler."""
     try:
         if not message or not message.strip():
@@ -109,18 +90,20 @@ def process_message(message: str, history: List[Dict[str, str]], session_id: str
             process_message.sessions[session_id] = session
         
         # Interrupt onayı mı?
-        if hasattr(session, 'pending_interrupt') and session.pending_interrupt:
+        if session.pending_interrupt:
             approval = message.strip().lower()
             is_approved = approval in ("evet", "yes", "e", "y", "true", "1", "onayla")
             resume_value = "evet" if is_approved else "hayır"
             
-            final, trace, _ = _run_graph(None, session.config, session, resume_value)
-            session.trace = trace
+            # Interrupt'ı resume et
+            result = graph.invoke(Command(resume=resume_value), session.config)
+            session.trace.append("INTERRUPT: onay verildi" if is_approved else "INTERRUPT: reddedildi")
             session.pending_interrupt = None
             
-            if final:
+            answer = get_answer_from_state(result)
+            if answer:
                 session.history.append({"role": "user", "content": message})
-                session.history.append({"role": "assistant", "content": final})
+                session.history.append({"role": "assistant", "content": answer})
             else:
                 session.history.append({"role": "user", "content": message})
                 session.history.append({"role": "assistant", "content": "İşlem tamamlandı."})
@@ -137,24 +120,73 @@ def process_message(message: str, history: List[Dict[str, str]], session_id: str
             "pending_tool": None
         }
         
-        final, trace, interrupt = _run_graph(state, session.config, session)
+        # Graph'ı çalıştır
+        trace = []
+        final_answer = None
+        pending = None
+        
+        for event in graph.stream(state, session.config):
+            # Her node'u trace et
+            for node_name, node_state in event.items():
+                if node_name.startswith("__"):
+                    continue
+                
+                trace.append(f"{node_name.upper()}: çalıştı")
+                
+                # Tool çağrıları
+                if node_state.get("tool_calls"):
+                    for tc in node_state["tool_calls"]:
+                        trace.append(f"   → Tool: {tc.get('name', 'unknown')}")
+                
+                # Final answer
+                if node_state.get("final_answer"):
+                    final_answer = node_state["final_answer"]
+                
+                # AI mesajları
+                if not final_answer and node_state.get("messages"):
+                    for m in reversed(node_state["messages"]):
+                        if isinstance(m, AIMessage):
+                            content = getattr(m, 'content', '')
+                            if content and len(content) > 5:
+                                final_answer = content
+                                break
+            
+            # Interrupt kontrolü
+            if "__interrupt__" in event:
+                interrupt_info = event["__interrupt__"][0]
+                value = interrupt_info.value
+                trace.append(f"⛔ Interrupt: {value.get('tool_name', 'unknown')}")
+                pending = value
+                break
+        
         session.trace = trace
         
         # Interrupt var mı?
-        if interrupt:
-            session.pending_interrupt = interrupt
-            status = f"⛔ ONAY GEREKLİ: {interrupt.get('tool_name', 'unknown')} - 'evet' veya 'hayır' yazın"
-            return session.history, format_trace(session.trace), status
+        if pending:
+            session.pending_interrupt = pending
+            status = f"⛔ ONAY GEREKLİ: {pending.get('tool_name', 'unknown')} - 'evet' veya 'hayır' yazın"
+            return session.history, format_trace(trace), status
+        
+        # Yanıtı al
+        if not final_answer:
+            final_answer = get_answer_from_state(state)
         
         # Cevabı history'ye ekle
-        if final:
+        if final_answer:
+            # JSON çıktısını temizle
+            import re
+            cleaned = re.sub(r'```json\s*\{[\s\S]*?\}\s*```', '', final_answer).strip()
+            cleaned = re.sub(r'\{[\s\S]*?\}\s*$', '', cleaned).strip()
+            if not cleaned:
+                cleaned = final_answer
+            
             session.history.append({"role": "user", "content": message})
-            session.history.append({"role": "assistant", "content": final})
-            return session.history, format_trace(session.trace), "✅ Yanıt hazır."
+            session.history.append({"role": "assistant", "content": cleaned})
+            return session.history, format_trace(trace), "✅ Yanıt hazır."
         else:
             session.history.append({"role": "user", "content": message})
             session.history.append({"role": "assistant", "content": "Yanıt üretilemedi."})
-            return session.history, format_trace(session.trace), "⚠️ Yanıt üretilemedi."
+            return session.history, format_trace(trace), "⚠️ Yanıt üretilemedi."
         
     except Exception as e:
         error_detail = traceback.format_exc()
@@ -163,7 +195,6 @@ def process_message(message: str, history: List[Dict[str, str]], session_id: str
 
 
 def clear_chat():
-    """Chat'i temizler."""
     if hasattr(process_message, "sessions"):
         process_message.sessions.clear()
     return [], "", "✅ Yeni oturum başlatıldı."
@@ -266,7 +297,7 @@ def main():
     demo = create_ui()
     demo.launch(
         server_name="0.0.0.0",
-        server_port=7865,
+        server_port=7866,
         share=False,
         show_error=True,
     )
