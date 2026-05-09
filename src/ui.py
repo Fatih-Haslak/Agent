@@ -236,7 +236,7 @@ body {
 # ── Gradio UI ───────────────────────────────────────────────────────
 
 def create_ui():
-    with gr.Blocks(title="🤖 Multi-Agent System") as demo:
+    with gr.Blocks(title="🤖 Multi-Agent System", css=ANTI_FLICKER_CSS) as demo:
         gr.Markdown("""
         # 🤖 Multi-Agent System with LangGraph
         
@@ -337,7 +337,6 @@ def main():
         server_port=7867,
         share=False,
         show_error=True,
-        css=ANTI_FLICKER_CSS,
     )
 
 
