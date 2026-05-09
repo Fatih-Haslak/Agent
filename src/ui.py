@@ -14,7 +14,11 @@ import sys
 import re
 import traceback
 import gradio as gr
+import gradio.networking as networking
 from typing import List, Dict, Any, Generator
+
+# Gradio 4.x Windows localhost erişilebilirlik kontrolünü bypass et
+networking.url_ok = lambda x: True
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
