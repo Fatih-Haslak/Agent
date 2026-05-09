@@ -22,7 +22,7 @@ KURAL:
    - Araç kullanman gerekiyorsa, KESİNLİKLE JSON formatında tool çağrısı yap.
 
 DOĞRU ÖRNEK (araç kullanımı):
-{"tool": "wiki_search", "args": {"query": "Sergen Yalçın", "max_chars": 1500}}
+{"name": "wiki_search", "args": {"query": "Sergen Yalçın", "max_chars": 1500}}
 
 DOĞRU ÖRNEK (sonucu değerlendirme):
 Sergen Yalçın, 5 Kasım 1972'de İstanbul'da doğan Türk futbol antrenörü ve eski futbolcudur...
@@ -51,10 +51,10 @@ def research_node(state: AgentState):
 
     # Önce JSON ara (yeni araştırma)
     tool_call = extract_json(raw)
-    if tool_call and "tool" in tool_call:
+    if tool_call and "name" in tool_call:
         return {
-            "messages": [AIMessage(content=f"[Research] Tool çağrısı: {tool_call['tool']}")],
-            "tool_calls": [{"name": tool_call["tool"], "args": tool_call.get("args", {}), "id": "tc_research"}],
+            "messages": [AIMessage(content=f"[Research] Tool çağrısı: {tool_call['name']}")],
+            "tool_calls": [{"name": tool_call["name"], "args": tool_call.get("args", {}), "id": "tc_research"}],
             "current_agent": "research"
         }
 

@@ -19,7 +19,7 @@ KURAL:
    - Araç kullanman gerekiyorsa, KESİNLİKLE JSON formatında tool çağrısı yap.
 
 DOĞRU ÖRNEK (araç kullanımı):
-{"tool": "calculator", "args": {"expression": "15 * 23"}}
+{"name": "calculator", "args": {"expression": "15 * 23"}}
 
 DOĞRU ÖRNEK (sonucu değerlendirme):
 15 ile 23'ü çarptığımızda 345 eder. Bu sonuç...
@@ -47,10 +47,10 @@ def tool_agent_node(state: AgentState):
     raw = llm.chat(TOOL_PROMPT, user_prompt, max_new_tokens=200, temperature=0.0)
 
     tool_call = extract_json(raw)
-    if tool_call and "tool" in tool_call:
+    if tool_call and "name" in tool_call:
         return {
-            "messages": [AIMessage(content=f"[Tool] Tool çağrısı: {tool_call['tool']}")],
-            "tool_calls": [{"name": tool_call["tool"], "args": tool_call.get("args", {}), "id": "tc_tool"}],
+            "messages": [AIMessage(content=f"[Tool] Tool çağrısı: {tool_call['name']}")],
+            "tool_calls": [{"name": tool_call["name"], "args": tool_call.get("args", {}), "id": "tc_tool"}],
             "current_agent": "tool"
         }
 

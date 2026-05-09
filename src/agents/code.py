@@ -15,10 +15,10 @@ KURAL:
 3. SADECE aşağıdaki JSON formatında tool çağrısı yap:
 
 DOĞRU ÖRNEK (kod çalıştırma):
-{"tool": "code_exec", "args": {"language": "python", "code": "for i in range(5): print(i)"}}
+{"name": "code_exec", "args": {"language": "python", "code": "for i in range(5): print(i)"}}
 
 DOĞRU ÖRNEK (dosya yazma):
-{"tool": "file_io", "args": {"action": "write", "file_path": "merhaba.py", "content": "print('Merhaba')"}}
+{"name": "file_io", "args": {"action": "write", "file_path": "merhaba.py", "content": "print('Merhaba')"}}
 
 YANLIŞ ÖRNEK (ASLA YAPMA):
 - Doğrudan kod yazıp cevap verme!
@@ -45,10 +45,10 @@ def code_node(state: AgentState):
 
     # Markdown kod bloklarını da parse et
     tool_call = extract_json(raw)
-    if tool_call and "tool" in tool_call:
+    if tool_call and "name" in tool_call:
         return {
-            "messages": [AIMessage(content=f"[Code] Tool çağrısı: {tool_call['tool']}")],
-            "tool_calls": [{"name": tool_call["tool"], "args": tool_call.get("args", {}), "id": "tc_code"}],
+            "messages": [AIMessage(content=f"[Code] Tool çağrısı: {tool_call['name']}")],
+            "tool_calls": [{"name": tool_call["name"], "args": tool_call.get("args", {}), "id": "tc_code"}],
             "current_agent": "code"
         }
 
