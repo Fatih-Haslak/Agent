@@ -1,16 +1,15 @@
 """
-Gradio Web UI for Multi-Agent System
-=====================================
-Chat interface with agent reasoning display and interrupt handling.
-Compatible with Gradio 6.x
-Uses graph.invoke for reliable execution
+Gradio Web UI for Multi-Agent System with Streaming
+====================================================
+Chat interface with streaming, ReAct pattern, and interrupt handling.
 """
 
 import os
 import sys
+import re
 import traceback
 import gradio as gr
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Generator
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -21,15 +20,31 @@ from src.graph import graph
 from src.config import get_llm_engine
 
 
+# ── Session Management ──────────────────────────────────────────────
+
+class SessionManager:
+    _sessions: Dict[str, "ChatSession"] = {}
+
+    @classmethod
+    def get_or_create(cls, session_id: str) -> "ChatSession":
+        if session_id not in cls._sessions:
+            cls._sessions[session_id] = ChatSession()
+        return cls._sessions[session_id]
+
+    @classmethod
+    def clear(cls):
+        cls._sessions.clear()
+
+
 class ChatSession:
     def __init__(self):
         self.thread_id = f"gradio-session-{id(self)}"
         self.config = {"configurable": {"thread_id": self.thread_id}}
-        self.history: List[Dict[str, str]] = []
         self.trace: List[str] = []
         self.pending_interrupt: Dict[str, Any] = None
-        self.last_state: Dict[str, Any] = None
 
+
+# ── Formatting Helpers ──────────────────────────────────────────────
 
 def format_trace(trace: List[str]) -> str:
     if not trace:
@@ -39,168 +54,157 @@ def format_trace(trace: List[str]) -> str:
         emoji = {
             "supervisor": "🗺️", "research": "📚", "code": "💻",
             "tool": "🔧", "tools": "⚙️", "interrupt": "⛔", "finish": "✅",
+            "think": "💭", "action": "🎯", "observe": "👁️",
         }.get(step.lower(), "•")
         lines.append(f"{emoji} {step}")
     return "\n".join(lines)
 
 
-def get_answer_from_state(state: Dict[str, Any]) -> str:
-    """State'ten en iyi yanıtı çıkarır."""
-    # 1. final_answer var mı?
-    final = state.get("final_answer")
-    if final and len(str(final)) > 5:
-        return str(final)
-    
-    # 2. Son AI mesajını bul
-    messages = state.get("messages", [])
-    for m in reversed(messages):
-        if isinstance(m, AIMessage):
-            content = getattr(m, 'content', '')
-            if content and len(content) > 5 and not content.startswith("["):
-                # JSON çıktısını temizle
-                import re
-                cleaned = re.sub(r'\{[\s\S]*?\}\s*$', '', content).strip()
-                if cleaned:
-                    return cleaned
-                return content
-    
-    # 3. Son mesaj herhangi bir tür
-    if messages:
-        last = messages[-1]
-        content = getattr(last, 'content', str(last))
-        if content and len(content) > 5:
-            return content
-    
-    return None
+def clean_answer(text: str) -> str:
+    """Yanıttan JSON ve markdown kalıntılarını temizler."""
+    if not text:
+        return text
+    cleaned = re.sub(r'```json\s*\{[\s\S]*?\}\s*```', '', text).strip()
+    cleaned = re.sub(r'\{[\s\S]*?\}\s*$', '', cleaned).strip()
+    return cleaned or text
 
 
-def process_message(message: str, history: List[Dict[str, str]], session_id: str):
-    """Kullanıcı mesajını işler."""
-    try:
-        if not message or not message.strip():
-            return history, format_trace([]), "Boş mesaj."
-        
-        # Session yönetimi
-        if not hasattr(process_message, "sessions"):
-            process_message.sessions = {}
-        
-        session = process_message.sessions.get(session_id)
-        if not session:
-            session = ChatSession()
-            process_message.sessions[session_id] = session
-        
-        # Interrupt onayı mı?
-        if session.pending_interrupt:
-            approval = message.strip().lower()
-            is_approved = approval in ("evet", "yes", "e", "y", "true", "1", "onayla")
-            resume_value = "evet" if is_approved else "hayır"
-            
-            # Interrupt'ı resume et
-            result = graph.invoke(Command(resume=resume_value), session.config)
-            session.trace.append("INTERRUPT: onay verildi" if is_approved else "INTERRUPT: reddedildi")
+# ── Streaming Graph Runner ──────────────────────────────────────────
+
+def process_message_stream(
+    message: str,
+    history: List[Dict[str, str]],
+    session_id: str
+) -> Generator[List[Dict[str, str]], str, str]:
+    """Kullanıcı mesajını işler ve graph event'lerini stream eder."""
+
+    # Boş mesaj kontrolü
+    if not message or not message.strip():
+        yield history, format_trace([]), "Boş mesaj."
+        return
+
+    session = SessionManager.get_or_create(session_id)
+
+    # ── Interrupt Onayı ─────────────────────────────────────────────
+    if session.pending_interrupt:
+        approval = message.strip().lower()
+        is_approved = approval in ("evet", "yes", "e", "y", "true", "1", "onayla")
+        resume_value = "evet" if is_approved else "hayır"
+
+        current_history = list(history)
+        current_history.append({"role": "user", "content": message})
+        placeholder_idx = len(current_history)
+        current_history.append({"role": "assistant", "content": "⏳ Onay işleniyor..."})
+
+        yield current_history.copy(), format_trace(session.trace), "🔄 Onay işleniyor..."
+
+        try:
+            trace = list(session.trace)
+            for event in graph.stream(Command(resume=resume_value), session.config):
+                for node_name, node_state in event.items():
+                    if node_name.startswith("__"):
+                        continue
+
+                    trace.append(f"{node_name.upper()}: çalıştı")
+                    status = f"🔄 {node_name.upper()} çalışıyor..."
+                    current_history[-1] = {"role": "assistant", "content": f"⏳ {status}"}
+                    yield current_history.copy(), format_trace(trace), status
+
+                    if node_state.get("final_answer"):
+                        final = clean_answer(node_state["final_answer"])
+                        current_history[-1] = {"role": "assistant", "content": final}
+                        session.trace = trace
+                        session.pending_interrupt = None
+                        yield current_history.copy(), format_trace(trace), "✅ Yanıt hazır."
+                        return
+
+            # Eğer final_answer yoksa
+            current_history[-1] = {"role": "assistant", "content": "İşlem tamamlandı."}
+            session.trace = trace
             session.pending_interrupt = None
-            
-            answer = get_answer_from_state(result)
-            if answer:
-                session.history.append({"role": "user", "content": message})
-                session.history.append({"role": "assistant", "content": answer})
-            else:
-                session.history.append({"role": "user", "content": message})
-                session.history.append({"role": "assistant", "content": "İşlem tamamlandı."})
-            
-            return session.history, format_trace(session.trace), "Onay işlendi."
-        
-        # Normal mesaj
-        state = {
-            "messages": [HumanMessage(content=message)],
-            "tool_calls": [],
-            "current_agent": "supervisor",
-            "iteration_count": 0,
-            "final_answer": None,
-            "pending_tool": None
-        }
-        
-        # Graph'ı çalıştır
+            yield current_history.copy(), format_trace(trace), "✅ İşlem tamamlandı."
+            return
+
+        except Exception as e:
+            error_detail = traceback.format_exc()
+            print(f"UI HATASI (interrupt resume): {error_detail}")
+            current_history[-1] = {"role": "assistant", "content": f"❌ Hata: {str(e)}"}
+            session.pending_interrupt = None
+            yield current_history.copy(), format_trace(session.trace), f"❌ Hata: {str(e)}"
+            return
+
+    # ── Normal Mesaj İşleme ─────────────────────────────────────────
+    state = {
+        "messages": [HumanMessage(content=message)],
+        "tool_calls": [],
+        "current_agent": "supervisor",
+        "iteration_count": 0,
+        "final_answer": None,
+        "pending_tool": None
+    }
+
+    current_history = list(history)
+    current_history.append({"role": "user", "content": message})
+    current_history.append({"role": "assistant", "content": "⏳ Supervisor karar veriyor..."})
+
+    yield current_history.copy(), format_trace([]), "🔄 Başlatılıyor..."
+
+    try:
         trace = []
-        final_answer = None
-        pending = None
-        
         for event in graph.stream(state, session.config):
-            # Her node'u trace et
-            for node_name, node_state in event.items():
-                if node_name.startswith("__"):
-                    continue
-                
-                trace.append(f"{node_name.upper()}: çalıştı")
-                
-                # Tool çağrıları
-                if node_state.get("tool_calls"):
-                    for tc in node_state["tool_calls"]:
-                        trace.append(f"   → Tool: {tc.get('name', 'unknown')}")
-                
-                # Final answer
-                if node_state.get("final_answer"):
-                    final_answer = node_state["final_answer"]
-                
-                # AI mesajları
-                if not final_answer and node_state.get("messages"):
-                    for m in reversed(node_state["messages"]):
-                        if isinstance(m, AIMessage):
-                            content = getattr(m, 'content', '')
-                            if content and len(content) > 5:
-                                final_answer = content
-                                break
-            
             # Interrupt kontrolü
             if "__interrupt__" in event:
                 interrupt_info = event["__interrupt__"][0]
                 value = interrupt_info.value
                 trace.append(f"⛔ Interrupt: {value.get('tool_name', 'unknown')}")
-                pending = value
-                break
-        
+                status = f"⛔ ONAY GEREKLİ: {value.get('tool_name', 'unknown')} - 'evet' veya 'hayır' yazın"
+                current_history[-1] = {"role": "assistant", "content": status}
+                session.trace = trace
+                session.pending_interrupt = value
+                yield current_history.copy(), format_trace(trace), status
+                return
+
+            for node_name, node_state in event.items():
+                if node_name.startswith("__"):
+                    continue
+
+                trace.append(f"{node_name.upper()}: çalıştı")
+
+                if node_state.get("tool_calls"):
+                    for tc in node_state["tool_calls"]:
+                        trace.append(f"   → Tool: {tc.get('name', 'unknown')}")
+
+                status = f"🔄 {node_name.upper()} çalışıyor..."
+                current_history[-1] = {"role": "assistant", "content": f"⏳ {status}"}
+                yield current_history.copy(), format_trace(trace), status
+
+                if node_state.get("final_answer"):
+                    final = clean_answer(node_state["final_answer"])
+                    current_history[-1] = {"role": "assistant", "content": final}
+                    session.trace = trace
+                    yield current_history.copy(), format_trace(trace), "✅ Yanıt hazır."
+                    return
+
+        # Eğer final_answer hiç set edilmediyse (güvenlik neti)
+        current_history[-1] = {"role": "assistant", "content": "Yanıt üretilemedi."}
         session.trace = trace
-        
-        # Interrupt var mı?
-        if pending:
-            session.pending_interrupt = pending
-            status = f"⛔ ONAY GEREKLİ: {pending.get('tool_name', 'unknown')} - 'evet' veya 'hayır' yazın"
-            return session.history, format_trace(trace), status
-        
-        # Yanıtı al
-        if not final_answer:
-            final_answer = get_answer_from_state(state)
-        
-        # Cevabı history'ye ekle
-        if final_answer:
-            # JSON çıktısını temizle
-            import re
-            cleaned = re.sub(r'```json\s*\{[\s\S]*?\}\s*```', '', final_answer).strip()
-            cleaned = re.sub(r'\{[\s\S]*?\}\s*$', '', cleaned).strip()
-            if not cleaned:
-                cleaned = final_answer
-            
-            session.history.append({"role": "user", "content": message})
-            session.history.append({"role": "assistant", "content": cleaned})
-            return session.history, format_trace(trace), "✅ Yanıt hazır."
-        else:
-            session.history.append({"role": "user", "content": message})
-            session.history.append({"role": "assistant", "content": "Yanıt üretilemedi."})
-            return session.history, format_trace(trace), "⚠️ Yanıt üretilemedi."
-        
+        yield current_history.copy(), format_trace(trace), "⚠️ Yanıt üretilemedi."
+
     except Exception as e:
         error_detail = traceback.format_exc()
         print(f"UI HATASI: {error_detail}")
-        return history, format_trace([]), f"❌ Hata: {str(e)}"
+        current_history[-1] = {"role": "assistant", "content": f"❌ Hata: {str(e)}"}
+        yield current_history.copy(), format_trace([]), f"❌ Hata: {str(e)}"
 
+
+# ── UI Helpers ──────────────────────────────────────────────────────
 
 def clear_chat():
-    if hasattr(process_message, "sessions"):
-        process_message.sessions.clear()
+    SessionManager.clear()
     return [], "", "✅ Yeni oturum başlatıldı."
 
 
-# ── Gradio UI ─────────────────────────────────────────
+# ── Gradio UI ───────────────────────────────────────────────────────
 
 def create_ui():
     with gr.Blocks(title="🤖 Multi-Agent System") as demo:
@@ -211,9 +215,11 @@ def create_ui():
         
         **Agents:** Supervisor → Research | Code | Tool
         
-        **Özellikler:** Human-in-the-loop onay • SQLite bellek • Türkçe
+        **Özellikler:** ReAct Pattern • Streaming • Human-in-the-loop • Türkçe
         """)
         
+        session_state = gr.State(value="default-session")
+
         with gr.Row():
             with gr.Column(scale=3):
                 chatbot = gr.Chatbot(
@@ -238,7 +244,7 @@ def create_ui():
             
             with gr.Column(scale=1):
                 trace_display = gr.Textbox(
-                    label="🔍 Ajan Çalışma İzleme",
+                    label="🔍 Ajan Çalışma İzleme (ReAct)",
                     interactive=False,
                     lines=20,
                     value="Henüz çalışma izi yok.",
@@ -257,10 +263,10 @@ def create_ui():
                 Kritik tool'lar öncesinde onay istenir.
                 """)
         
-        # Event handlers
+        # Event handlers — STREAMING
         send_btn.click(
-            fn=process_message,
-            inputs=[msg_input, chatbot, gr.State(value="default-session")],
+            fn=process_message_stream,
+            inputs=[msg_input, chatbot, session_state],
             outputs=[chatbot, trace_display, status_text],
         ).then(
             fn=lambda: "",
@@ -268,8 +274,8 @@ def create_ui():
         )
         
         msg_input.submit(
-            fn=process_message,
-            inputs=[msg_input, chatbot, gr.State(value="default-session")],
+            fn=process_message_stream,
+            inputs=[msg_input, chatbot, session_state],
             outputs=[chatbot, trace_display, status_text],
         ).then(
             fn=lambda: "",
@@ -289,6 +295,7 @@ def main():
     print("=" * 60)
     print("🤖 Multi-Agent System Gradio UI")
     print("   Model: ytu-ce-cosmos/Turkish-Gemma-9b-v0.1")
+    print("   Features: ReAct Pattern + Streaming")
     print("=" * 60)
     print("\n📥 LLM hazırlanıyor...")
     get_llm_engine()
@@ -297,7 +304,7 @@ def main():
     demo = create_ui()
     demo.launch(
         server_name="0.0.0.0",
-        server_port=7866,
+        server_port=7867,
         share=False,
         show_error=True,
     )

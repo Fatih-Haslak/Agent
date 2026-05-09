@@ -5,32 +5,30 @@ from src.state import AgentState
 
 TOOL_PROMPT = """Sen bir Tool Agent'sın. Matematiksel hesaplama ve HTTP istekleri yaparsın.
 
-Kullanılabilir araçlar:
-- calculator(expression: str)  → Matematiksel ifadeyi hesaplar
-- http_request(method: str, url: str, headers: Optional[str] = None, body: Optional[str] = None) → HTTP isteği gönderir
+## Kullanılabilir Araçlar
+- calculator(expression): Matematiksel hesaplama
+- http_request(method, url): HTTP isteği gönderir
 
-KURAL:
-1. EĞER konuşma geçmişinde zaten bir calculator veya http_request SONUCU varsa (ToolMessage ile sonuç):
-   - Bu sonucu kullanarak doğrudan kullanıcıya cevap ver.
-   - TEKRAR calculator veya http_request çağrısı yapma!
-   - Sonucu açıkla, Türkçe olarak cevapla.
+## ReAct Pattern (Düşün → Hareket Et → Gözlemle)
+1. **Düşün**: Kullanıcı ne istiyor? Matematik mi? API mi?
+2. **Hareket Et**: İlgili tool'u çağır
+3. **Gözlemle**: Sonucu analiz et
 
-2. EĞER henüz hesaplama yapılmadıysa:
-   - Araç kullanman gerekiyorsa, KESİNLİKLE JSON formatında tool çağrısı yap.
+## Kurallar
+- Matematik → calculator
+- API/HTTP → http_request
+- Eğer zaten sonuç varsa → TEKRAR çağırma, sonucu değerlendir
 
-DOĞRU ÖRNEK (araç kullanımı):
-{"name": "calculator", "args": {"expression": "15 * 23"}}
+## ÖNEMLİ: SADECE JSON
 
-DOĞRU ÖRNEK (sonucu değerlendirme):
-15 ile 23'ü çarptığımızda 345 eder. Bu sonuç...
+### DOĞRU ÖRNEK:
+{"tool": "calculator", "args": {"expression": "15 * 23"}}
 
-YANLIŞ ÖRNEKLER (ASLA YAPMA):
-- Tekrar araç çağrısı yapmak (eğer zaten sonuç varsa)
-- calculator(15*23)  ← fonksiyon çağrısı yazma!
+### YANLIŞ ÖRNEKLER:
+- Hesaplayalım: {"tool": ...}  ← metin + JSON karıştırma
+- calculator(15*23)  ← fonksiyon çağrısı
 
-ÖNEMLİ: 
-- Zaten hesaplama sonucu varsa SADECE cevap ver.
-- Hesaplama yoksa SADECE JSON yaz."""
+SADECE düz JSON."""
 
 
 def tool_agent_node(state: AgentState):
@@ -43,14 +41,21 @@ def tool_agent_node(state: AgentState):
         content = getattr(m, 'content', str(m))
         context += f"{role}: {content[:500]}\n"
 
-    user_prompt = f"Konuşma geçmişi:\n{context}\n\nGörevi tamamla. Zaten hesaplama sonucu varsa onu kullan. Yoksa SADECE JSON yaz."
+    user_prompt = f"""Konuşma geçmişi:
+{context}
+
+ReAct Pattern:
+ADIM 1 - Düşün: Matematiksel işlem mi, yoksa HTTP mi?
+ADIM 2 - Karar: Hangi tool'u kullanmalıyım?
+ADIM 3 - Eğer tool kullanacaksam SADECE JSON yaz. Yoksa doğrudan cevap ver."""
+
     raw = llm.chat(TOOL_PROMPT, user_prompt, max_new_tokens=200, temperature=0.0)
 
     tool_call = extract_json(raw)
-    if tool_call and "name" in tool_call:
+    if tool_call and "tool" in tool_call:
         return {
-            "messages": [AIMessage(content=f"[Tool] Tool çağrısı: {tool_call['name']}")],
-            "tool_calls": [{"name": tool_call["name"], "args": tool_call.get("args", {}), "id": "tc_tool"}],
+            "messages": [AIMessage(content=f"[Tool] Tool çağrısı: {tool_call['tool']}")],
+            "tool_calls": [{"name": tool_call["tool"], "args": tool_call.get("args", {}), "id": "tc_tool"}],
             "current_agent": "tool"
         }
 

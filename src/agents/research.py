@@ -3,37 +3,36 @@ from src.config import get_llm_engine, extract_json
 from src.state import AgentState
 
 
-RESEARCH_PROMPT = """Sen bir Research Agent'sın. Web veya Wikipedia araması yaparak bilgi toplar ve özetlersin.
+RESEARCH_PROMPT = """Sen bir Research Agent'sın. Web veya Wikipedia araması yaparak bilgi toplarsın.
 
-Kullanılabilir araçlar:
-- wiki_search(query: str, max_chars: int = 1500)  → Türkçe Wikipedia'da arama yapar, GÜVENİLİR ve DETAYLI sonuçlar döndürür
-- web_search(query: str, max_results: int = 3)    → Genel web araması yapar
-- summarize(text: str, max_words: int = 100)       → Metni özetler
+## Kullanılabilir Araçlar
+- wiki_search(query, max_chars): Türkçe Wikipedia'da detaylı arama
+- web_search(query, max_results): Genel web araması
+- summarize(text, max_words): Metin özetleme
 
-KURAL:
-1. EĞER konuşma geçmişinde zaten bir wiki_search SONUCU varsa (ToolMessage veya Wikipedia sonucu):
-   - Bu sonuçları kullanarak doğrudan kullanıcıya cevap ver.
-   - TEKRAR wiki_search veya web_search çağrısı yapma!
-   - Sonuçları analiz et, önemli bilgileri çıkar, Türkçe olarak cevapla.
+## ReAct Pattern (Düşün → Hareket Et → Gözlemle)
+1. **Düşün**: Kullanıcı ne hakkında bilgi istiyor?
+2. **Hareket Et**: Hangi tool'u kullanmalıyım?
+3. **Gözlemle**: Tool sonucunu analiz et
 
-2. EĞER henüz araştırma yapılmadıysa:
-   - Bilgi sorusu için ÖNCELİKLE wiki_search kullan (Wikipedia daha güvenilir)
-   - Güncel haber/yazılım gibi konularda web_search kullan
-   - Araç kullanman gerekiyorsa, KESİNLİKLE JSON formatında tool çağrısı yap.
+## Kurallar
+- Bilgi sorusu → wiki_search (ÖNCELİKLİ)
+- Güncel haber → web_search
+- Eğer zaten araştırma sonucu varsa → TEKRAR tool çağırma, sonucu değerlendir
 
-DOĞRU ÖRNEK (araç kullanımı):
-{"name": "wiki_search", "args": {"query": "Sergen Yalçın", "max_chars": 1500}}
+## ÖNEMLİ: Tool kullanacaksan SADECE JSON yaz
 
-DOĞRU ÖRNEK (sonucu değerlendirme):
-Sergen Yalçın, 5 Kasım 1972'de İstanbul'da doğan Türk futbol antrenörü ve eski futbolcudur...
+### DOĞRU ÖRNEK (araç çağrısı):
+{"tool": "wiki_search", "args": {"query": "Atatürk", "max_chars": 1500}}
 
-YANLIŞ ÖRNEKLER (ASLA YAPMA):
-- Tekrar araç çağrısı yapmak (eğer zaten sonuç varsa)
-- {"tool": "wiki_search", ...} Sonuç: ...  ← JSON ve metin karıştırma
+### DOĞRU ÖRNEK (sonuç değerlendirme):
+Atatürk, Türkiye Cumhuriyeti'nin kurucusudur...
 
-ÖNEMLİ: 
-- Zaten araştırma sonucu varsa SADECE cevap ver.
-- Araştırma yoksa SADECE JSON yaz."""
+### YANLIŞ ÖRNEKLER:
+- JSON ve metin karıştırma
+- Tekrar araç çağrısı (eğer sonuç varsa)
+
+SADECE düz JSON veya düz metin yaz."""
 
 
 def research_node(state: AgentState):
@@ -46,19 +45,26 @@ def research_node(state: AgentState):
         content = getattr(m, 'content', str(m))
         context += f"{role}: {content[:500]}\n"
 
-    user_prompt = f"Konuşma geçmişi:\n{context}\n\nGörevi tamamla. Zaten araştırma sonucu varsa onu kullan. Yoksa SADECE JSON yaz."
+    user_prompt = f"""Konuşma geçmişi:
+{context}
+
+ReAct Pattern ile görevi tamamla:
+ADIM 1 - Düşün: Ne hakkında bilgi toplamalıyım?
+ADIM 2 - Karar: Tool kullanmalı mıyım?
+ADIM 3 - Eğer tool kullanacaksam SADECE JSON yaz, yoksa doğrudan cevap ver."""
+
     raw = llm.chat(RESEARCH_PROMPT, user_prompt, max_new_tokens=512, temperature=0.3)
 
-    # Önce JSON ara (yeni araştırma)
+    # JSON ara
     tool_call = extract_json(raw)
-    if tool_call and "name" in tool_call:
+    if tool_call and "tool" in tool_call:
         return {
-            "messages": [AIMessage(content=f"[Research] Tool çağrısı: {tool_call['name']}")],
-            "tool_calls": [{"name": tool_call["name"], "args": tool_call.get("args", {}), "id": "tc_research"}],
+            "messages": [AIMessage(content=f"[Research] Tool çağrısı: {tool_call['tool']}")],
+            "tool_calls": [{"name": tool_call["tool"], "args": tool_call.get("args", {}), "id": "tc_research"}],
             "current_agent": "research"
         }
 
-    # JSON bulunamadıysa, doğrudan yanıt olarak kabul et (sonuç değerlendirme)
+    # Doğrudan yanıt
     return {
         "messages": [AIMessage(content=raw)],
         "tool_calls": [],

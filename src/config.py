@@ -1,13 +1,15 @@
 """
 LLM Yapılandırması — Local Turkish-Gemma-9b Model
+Enhanced with Streaming + ReAct Pattern Support
 """
 
 import os
 import re
 import json
 import torch
-from typing import List, Dict, Any, Optional
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from typing import List, Dict, Any, Optional, Generator
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, TextIteratorStreamer
+from threading import Thread
 
 MODEL_ID = "ytu-ce-cosmos/Turkish-Gemma-9b-v0.1"
 USE_4BIT = os.getenv("USE_4BIT", "true").lower() in ("true", "1", "yes")
@@ -59,7 +61,7 @@ class ModelLoader:
 
 
 class LLMEngine:
-    """Dil modeli çıkarım motoru."""
+    """Dil modeli çıkarım motoru - Streaming destekli."""
 
     def __init__(self, tokenizer, model):
         self.tokenizer = tokenizer
@@ -76,14 +78,13 @@ class LLMEngine:
                 pass
         return terms
 
-    @torch.inference_mode()
-    def generate(self, messages: List[Dict[str, str]], max_new_tokens: int = 256, temperature: float = 0.7) -> str:
+    def _build_prompt(self, messages: List[Dict[str, str]]) -> str:
+        """Mesajları prompt formatına dönüştürür."""
         try:
-            prompt = self.tokenizer.apply_chat_template(
+            return self.tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
             )
         except Exception:
-            # Fallback: manuel chat formatı
             prompt = ""
             for m in messages:
                 role = m.get("role", "user")
@@ -95,7 +96,11 @@ class LLMEngine:
                 else:
                     prompt += f"Asistan: {content}\n"
             prompt += "Asistan:"
+            return prompt
 
+    @torch.inference_mode()
+    def generate(self, messages: List[Dict[str, str]], max_new_tokens: int = 256, temperature: float = 0.7) -> str:
+        prompt = self._build_prompt(messages)
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
         outputs = self.model.generate(
             **inputs,
@@ -110,12 +115,53 @@ class LLMEngine:
         gen = outputs[0][inputs["input_ids"].shape[1]:]
         return self.tokenizer.decode(gen, skip_special_tokens=True).strip()
 
+    @torch.inference_mode()
+    def generate_stream(self, messages: List[Dict[str, str]], max_new_tokens: int = 256, temperature: float = 0.7) -> Generator[str, None, None]:
+        """Token-by-token streaming üretir."""
+        prompt = self._build_prompt(messages)
+        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+        
+        streamer = TextIteratorStreamer(
+            self.tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True
+        )
+        
+        generation_kwargs = dict(
+            **inputs,
+            streamer=streamer,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature if temperature > 0 else None,
+            do_sample=temperature > 0,
+            top_p=0.95,
+            repetition_penalty=1.05,
+            eos_token_id=self._terminators(),
+            pad_token_id=self.tokenizer.eos_token_id,
+        )
+        
+        thread = Thread(target=self.model.generate, kwargs=generation_kwargs)
+        thread.start()
+        
+        for text in streamer:
+            if text:
+                yield text
+        
+        thread.join()
+
     def chat(self, system_prompt: str, user_prompt: str, max_new_tokens: int = 256, temperature: float = 0.7) -> str:
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ]
         return self.generate(messages, max_new_tokens, temperature)
+
+    def chat_stream(self, system_prompt: str, user_prompt: str, max_new_tokens: int = 256, temperature: float = 0.7) -> Generator[str, None, None]:
+        """Streaming chat - token by token."""
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        yield from self.generate_stream(messages, max_new_tokens, temperature)
 
     def chat_with_history(self, system_prompt: str, user_prompt: str, history, max_new_tokens: int = 256, temperature: float = 0.7) -> str:
         messages = [{"role": "system", "content": system_prompt}]
@@ -124,7 +170,6 @@ class LLMEngine:
                 if isinstance(msg, dict):
                     messages.append(msg)
                 else:
-                    # LangChain message object
                     role = getattr(msg, 'type', 'user')
                     if role == 'human':
                         role = 'user'
@@ -134,6 +179,24 @@ class LLMEngine:
                     messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": user_prompt})
         return self.generate(messages, max_new_tokens, temperature)
+
+    def chat_with_history_stream(self, system_prompt: str, user_prompt: str, history, max_new_tokens: int = 256, temperature: float = 0.7) -> Generator[str, None, None]:
+        """Streaming chat with history."""
+        messages = [{"role": "system", "content": system_prompt}]
+        if history:
+            for msg in history:
+                if isinstance(msg, dict):
+                    messages.append(msg)
+                else:
+                    role = getattr(msg, 'type', 'user')
+                    if role == 'human':
+                        role = 'user'
+                    elif role == 'ai':
+                        role = 'assistant'
+                    content = getattr(msg, 'content', str(msg))
+                    messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": user_prompt})
+        yield from self.generate_stream(messages, max_new_tokens, temperature)
 
 
 # Singleton instance
@@ -149,15 +212,11 @@ def get_llm_engine() -> LLMEngine:
 
 
 def extract_json(text: str) -> Optional[Dict[str, Any]]:
-    """Metin içinden ilk JSON objesini çıkarır.
-    
-    Ciddi parser: kod blokları, düzensiz metinler, birden fazla JSON objesi
-    gibi karmaşık durumları yönetir.
-    """
+    """Metin içinden ilk JSON objesini çıkarır."""
     if not text:
         return None
     
-    # 1. JSON kod blokları arasından ara (```json ... ``` veya ``` ... ```)
+    # 1. JSON kod blokları
     code_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', text, re.DOTALL)
     if code_match:
         try:
@@ -165,7 +224,7 @@ def extract_json(text: str) -> Optional[Dict[str, Any]]:
         except json.JSONDecodeError:
             pass
     
-    # 1b. Tek satırlık ```json {...} ``` formatı
+    # 1b. Inline ```json {...} ```
     inline_code = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL)
     if inline_code:
         try:
@@ -173,8 +232,7 @@ def extract_json(text: str) -> Optional[Dict[str, Any]]:
         except json.JSONDecodeError:
             pass
     
-    # 2. Düz metin içinden en içteki { ... } parantezini bul
-    # Stack-based matching: doğru şekilde eşleşen süslü parantezleri bul
+    # 2. Stack-based süslü parantez eşleştirme
     best_match = None
     best_depth = 0
     
@@ -190,7 +248,6 @@ def extract_json(text: str) -> Optional[Dict[str, Any]]:
                         candidate = text[start:end+1]
                         try:
                             parsed = json.loads(candidate)
-                            # En derin (en içteki) eşleşmeyi tercih et
                             if candidate.count('{') > best_depth:
                                 best_match = parsed
                                 best_depth = candidate.count('{')

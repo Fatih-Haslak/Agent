@@ -5,29 +5,29 @@ from src.state import AgentState
 
 CODE_PROMPT = """Sen bir Code Agent'sın. Kullanıcının istediği kodu yazarsın ve çalıştırırsın.
 
-Mevcut araçların:
-- code_exec(language, code): Kodu çalıştırır
-- file_io(action, file_path, content): Dosya işlemleri
+## Kullanılabilir Araçlar
+- code_exec(language, code): Python/Bash/JS kodu çalıştırır
+- file_io(action, file_path, content): Dosya okuma/yazma/silme
 
-KURAL:
-1. Kullanıcı kod istediğinde, ÖNCE code_exec ile kodu ÇALIŞTIR.
-2. Kodu doğrudan yazıp cevap verme! code_exec toolunu KULLAN.
-3. SADECE aşağıdaki JSON formatında tool çağrısı yap:
+## ReAct Pattern (Düşün → Hareket Et → Gözlemle)
+1. **Düşün**: Kullanıcı ne tür kod istiyor?
+2. **Hareket Et**: code_exec ile kodu çalıştır
+3. **Gözlemle**: Çıktıyı analiz et
 
-DOĞRU ÖRNEK (kod çalıştırma):
-{"name": "code_exec", "args": {"language": "python", "code": "for i in range(5): print(i)"}}
+## KURAL: Kod istendiğinde KESİNLİKLE code_exec kullan
+Asla sadece kod yazıp cevap verme! Tool çağırması yap.
 
-DOĞRU ÖRNEK (dosya yazma):
-{"name": "file_io", "args": {"action": "write", "file_path": "merhaba.py", "content": "print('Merhaba')"}}
+## ÖNEMLİ: SADECE JSON FORMATINDA
 
-YANLIŞ ÖRNEK (ASLA YAPMA):
-- Doğrudan kod yazıp cevap verme!
-- Markdown kod bloğu kullanma!
-- Fonksiyon çağrısı yazma, SADECE JSON!
+### DOĞRU ÖRNEK:
+{"tool": "code_exec", "args": {"language": "python", "code": "for i in range(5): print(i)"}}
 
-ÖNEMLİ: 
-- Kod istendiğinde SADECE JSON yaz.
-- Araç kullanmana gerek yoksa (doğrudan yanıt) SADECE yanıtını yaz."""
+### YANLIŞ ÖRNEKLER:
+- Doğrudan kod yazma
+- Markdown kod bloğu kullanma
+- Fonksiyon çağrısı yazma
+
+SADECE düz JSON."""
 
 
 def code_node(state: AgentState):
@@ -35,20 +35,26 @@ def code_node(state: AgentState):
     llm = get_llm_engine()
     messages = state["messages"]
     context = ""
-    for m in messages[-8:]:
+    for m in messages[-10:]:
         role = getattr(m, 'type', 'unknown')
         content = getattr(m, 'content', str(m))
-        context += f"{role}: {content}\n"
+        context += f"{role}: {content[:500]}\n"
 
-    user_prompt = f"Konuşma geçmişi:\n{context}\n\nGörevi tamamla. Kod isteniyorsa SADECE code_exec JSON yaz. Yoksa doğrudan cevap ver."
+    user_prompt = f"""Konuşma geçmişi:
+{context}
+
+ReAct Pattern:
+ADIM 1 - Düşün: Kullanıcı ne tür kod istiyor?
+ADIM 2 - Karar: code_exec tool'u çağırmalı mıyım?
+ADIM 3 - Eğer kod çalıştıracaksam SADECE JSON yaz. Yoksa doğrudan cevap ver."""
+
     raw = llm.chat(CODE_PROMPT, user_prompt, max_new_tokens=400, temperature=0.1)
 
-    # Markdown kod bloklarını da parse et
     tool_call = extract_json(raw)
-    if tool_call and "name" in tool_call:
+    if tool_call and "tool" in tool_call:
         return {
-            "messages": [AIMessage(content=f"[Code] Tool çağrısı: {tool_call['name']}")],
-            "tool_calls": [{"name": tool_call["name"], "args": tool_call.get("args", {}), "id": "tc_code"}],
+            "messages": [AIMessage(content=f"[Code] Tool çağrısı: {tool_call['tool']}")],
+            "tool_calls": [{"name": tool_call["tool"], "args": tool_call.get("args", {}), "id": "tc_code"}],
             "current_agent": "code"
         }
 
