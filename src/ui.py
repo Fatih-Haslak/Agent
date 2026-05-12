@@ -536,32 +536,54 @@ def clear_chat():
 # =============================================================================
 
 ANTI_FLICKER_CSS = """
-/* Chatbot container'inin yuksekligini kilitle.
-   Gradio 5.x'te height=500 verilse bile container resize olabilir.
-   CSS ile min/max-height sabitlemek garanti saglar. */
+/* ================================================================
+   ANTI-FLICKER CSS: Sayfa titremesini onlemek icin agresif onlemler.
+   
+   Sorun: F11 (tam ekran)'da duzeliyor, normal modda titriyor.
+   Nedeni: Scrollbar'in gorunup kaybolmasi (~17px genislik degisimi)
+   layout shift'e yol aciyor.
+   
+   Cozum:
+     1. Scrollbar her zaman gorunur olsun (overflow-y: scroll)
+     2. Scrollbar genisligi sabitlensin (scrollbar-gutter: stable)
+     3. Sayfa scrollbar'i her zaman acik olsun
+     4. width: 100vw scrollbar genisligini hesaba katar
+   ================================================================ */
+
+/* TUM SAYFA: Scrollbar her zaman acik olsun, yatay scroll yasak */
+html {
+    overflow-y: scroll !important;
+    overflow-x: hidden !important;
+    width: 100vw !important;
+}
+body {
+    overflow-y: scroll !important;
+    overflow-x: hidden !important;
+    width: 100vw !important;
+}
+
+/* Scrollbar goruntuleme alanini sabitle (Chrome/Firefox modern) */
+body, html {
+    scrollbar-gutter: stable !important;
+}
+
+/* Chatbot container: scrollbar her zaman acik, yukseklik sabit */
 .chatbot-container {
     min-height: 500px !important;
     max-height: 500px !important;
-    overflow-y: auto !important;
+    overflow-y: scroll !important;
+    scrollbar-gutter: stable !important;
 }
 
-/* Mesaj baloncuklarinin genisligini sabitle.
-   Uzun mesajlarda balon genisligi degismesin. */
+/* Mesaj baloncuklarinin genisligini sabitle. */
 .message-wrap {
     max-width: 90% !important;
     word-break: break-word !important;
 }
 
-/* Ana Row'un hizalamasini sabitle.
-   Sag/sol sutunlar farkli yukseklikte oldugunda row ortalanmasin. */
+/* Ana Row hizalamasi sabit */
 .main-row {
     align-items: flex-start !important;
-}
-
-/* Yatay scrollbar'i gizle.
-   overflow-x: hidden ile sayfa genisliginin sabit kalmasi saglanir. */
-body {
-    overflow-x: hidden !important;
 }
 """
 
