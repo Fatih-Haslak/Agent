@@ -110,11 +110,8 @@ _gcu._json_schema_to_python_type = _patched_json_schema
 # =============================================================================
 # 2. GRADIO IMPORT & WINDOWS LOCALHOST BYPASS
 # =============================================================================
-# Gradio'nun launch() metodu, server baslatildiktan sonra localhost'un
-# erisilebilir olup olmadigini kontrol eder. Windows'ta bu kontrol
-# (ozellikle VPN/proxy durumlarinda) basarisiz olabilir ve
-# "ValueError: When localhost is not accessible..." hatasi verir.
-# networking.url_ok fonksiyonu her zaman True donerek bu kontrol bypass edilir.
+# Gradio 6.x'te css parametresi launch() metodu icindedir.
+# gradio.networking.url_ok bypass Windows localhost hatasi icin.
 # =============================================================================
 
 import gradio as gr
@@ -540,31 +537,45 @@ ANTI_FLICKER_CSS = """
    ANTI-FLICKER CSS: Sayfa titremesini onlemek icin agresif onlemler.
    
    Sorun: F11 (tam ekran)'da duzeliyor, normal modda titriyor.
-   Nedeni: Scrollbar'in gorunup kaybolmasi (~17px genislik degisimi)
-   layout shift'e yol aciyor.
+   
+   Olasi nedenler:
+     1. Scrollbar gorunup kayboluyor → layout shift
+     2. Gradio'nun CSS animasyon/transition'lari → surekli re-render
+     3. Emoji/icon font yuklenirken layout degisiyor
+     4. ResizeObserver dongusu → sonsuz re-render
    
    Cozum:
-     1. Scrollbar her zaman gorunur olsun (overflow-y: scroll)
-     2. Scrollbar genisligi sabitlensin (scrollbar-gutter: stable)
-     3. Sayfa scrollbar'i her zaman acik olsun
-     4. width: 100vw scrollbar genisligini hesaba katar
+     - Tum animasyon/transition/devre disi
+     - Scrollbar her zaman acik ve scrollbar-gutter stable
+     - contain ile container render'ini izole et
+     - Font loading shift'ini onle
    ================================================================ */
 
-/* TUM SAYFA: Scrollbar her zaman acik olsun, yatay scroll yasak */
+/* Tum CSS gecisleri ve animasyonlari devre disi */
+*, *::before, *::after {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+}
+
+/* Scrollbar her zaman acik, genislik sabit */
 html {
     overflow-y: scroll !important;
     overflow-x: hidden !important;
     width: 100vw !important;
+    scrollbar-gutter: stable !important;
 }
 body {
     overflow-y: scroll !important;
     overflow-x: hidden !important;
     width: 100vw !important;
+    scrollbar-gutter: stable !important;
 }
 
-/* Scrollbar goruntuleme alanini sabitle (Chrome/Firefox modern) */
-body, html {
-    scrollbar-gutter: stable !important;
+/* Gradio ana container'ini render izolasyonuna al */
+.gradio-container {
+    contain: layout style paint !important;
 }
 
 /* Chatbot container: scrollbar her zaman acik, yukseklik sabit */
@@ -573,17 +584,24 @@ body, html {
     max-height: 500px !important;
     overflow-y: scroll !important;
     scrollbar-gutter: stable !important;
+    contain: layout style paint !important;
 }
 
-/* Mesaj baloncuklarinin genisligini sabitle. */
+/* Mesaj baloncuklari sabit genislik */
 .message-wrap {
     max-width: 90% !important;
     word-break: break-word !important;
 }
 
-/* Ana Row hizalamasi sabit */
+/* Ana Row sabit hizalama */
 .main-row {
     align-items: flex-start !important;
+    contain: layout style paint !important;
+}
+
+/* Font loading shift'ini onle */
+body, .gradio-container, .main-row {
+    font-display: swap !important;
 }
 """
 
@@ -622,7 +640,7 @@ def create_ui():
     Returns:
         gr.Blocks: Gradio demo nesnesi (launch edilmis degil)
     """
-    with gr.Blocks(title="🤖 Multi-Agent System", css=ANTI_FLICKER_CSS) as demo:
+    with gr.Blocks(title="🤖 Multi-Agent System") as demo:
         # --- Baslik Bolumu -----------------------------------------------------
         gr.Markdown("""
         # 🤖 Multi-Agent System with LangGraph
@@ -650,7 +668,6 @@ def create_ui():
                     label="💬 Konuşma",
                     height=500,
                     elem_classes="chatbot-container",
-                    type="messages",
                     value=[],
                 )
 
@@ -793,6 +810,7 @@ def main():
         server_port=7867,
         share=False,
         show_error=True,
+        css=ANTI_FLICKER_CSS,
     )
 
 
