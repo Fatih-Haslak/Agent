@@ -1,3 +1,12 @@
+"""
+Multi-Agent System CLI
+======================
+Komut satiri arayuzu. Web UI icin:
+
+    streamlit run src/streamlit_app.py
+
+"""
+
 import os
 import sys
 
